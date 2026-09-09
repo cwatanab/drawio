@@ -1393,10 +1393,10 @@ Graph = function(container, model, renderHint, stylesheet, themes, standalone)
 		{
 			me = graphUpdateMouseEvent.apply(this, arguments);
 
-			// Use the same selection hit test for painted container backgrounds
+			// Use the same selection hit test for painted rectangular backgrounds
 			// and pointerEvents=0 backgrounds. Explicit handles keep their state.
 			if (this.isEnabled() && (me.state == null ||
-				(this.isSelectionContainer(me.state.cell) &&
+				(this.isSelectionBackground(me.state) &&
 				(me.isSource(me.state.shape) || me.isSource(me.state.text)))))
 			{
 				me.state = this.view.getState(this.getSelectionCellAt(
@@ -12755,6 +12755,23 @@ Graph.prototype.isSelectionContainer = function(cell)
 };
 
 /**
+ * Background hit testing also applies to ordinary rectangles. Keep this
+ * separate from isSelectionContainer: a leaf rectangle must not acquire
+ * group selection propagation or ancestor handles. Other shape geometries
+ * cannot use a rectangular border test.
+ */
+Graph.prototype.isSelectionBackground = function(state)
+{
+	return this.isSelectionContainer(state.cell) ||
+		(this.model.isVertex(state.cell) && !this.isPart(state.cell) &&
+		!this.isTable(state.cell) && state.shape != null &&
+		(state.shape.constructor == mxRectangleShape ||
+		(state.shape.constructor == mxLabel && state.shape.image == null &&
+		state.shape.indicator == null && state.shape.indicatorImage == null &&
+		state.shape.indicatorShape == null)));
+};
+
+/**
  * Hit testing for selection only. Connections and drop targets can still
  * use the full container bounds through getCellAt.
  */
@@ -12762,13 +12779,13 @@ Graph.prototype.getSelectionCellAt = function(x, y)
 {
 	return this.getCellAt(x, y, null, null, null, mxUtils.bind(this, function(state, px, py)
 	{
-		return this.isSelectionContainer(state.cell) &&
+		return this.isSelectionBackground(state) &&
 			!this.intersectsSelectionContainer(state, px, py);
 	}));
 };
 
 /**
- * Transparent interiors do not select their container. Visible labels,
+ * Transparent interiors do not select their rectangle or container. Visible labels,
  * swimlane headers and borders remain selectable, including when rotated.
  * Coordinates are in the same view space as getScaledCellAt.
  */
