@@ -1393,6 +1393,16 @@ Graph = function(container, model, renderHint, stylesheet, themes, standalone)
 		{
 			me = graphUpdateMouseEvent.apply(this, arguments);
 
+			// Use the same selection hit test for painted container backgrounds
+			// and pointerEvents=0 backgrounds. Explicit handles keep their state.
+			if (this.isEnabled() && (me.state == null ||
+				(this.isSelectionContainer(me.state.cell) &&
+				(me.isSource(me.state.shape) || me.isSource(me.state.text)))))
+			{
+				me.state = this.view.getState(this.getSelectionCellAt(
+					me.getGraphX(), me.getGraphY()));
+			}
+
 			if (me.state != null && this.isCellLocked(this.getLayerForCell(me.getCell())))
 			{
 				if (this.getLinkForCell(me.getCell()) == null)
@@ -1533,6 +1543,11 @@ Graph = function(container, model, renderHint, stylesheet, themes, standalone)
 	
 	//Create a unique offset object for each graph instance.
 	this.currentTranslate = new mxPoint(0, 0);
+
+	if (container != null && this.selectionCellsHandler != null)
+	{
+		this.initSelectionContainerHints();
+	}
 };
 
 /**
@@ -11530,27 +11545,9 @@ Graph.prototype.selectCellForEvent = function(cell, evt)
 		cell = anc;
 	}
 
-	// Click cycle through a transparentBounds chain. isPropagateSelectionCell
-	// stops the upward walk at a transparentBounds boundary, so for a child in
-	// a regular group in a transparentBounds group the cycle is:
-	//   1. group (first non-transparentBounds ancestor of the click)
-	//   2. child (propagation now stops at child because group is selected)
-	//   3. outer transparentBounds parent (propagation walks up past child)
-	// The drill-down step (selected is a strict ancestor of cell) keeps cell
-	// as-is; the escalate step (cell is at-or-above selected with a
-	// transparentBounds parent above it) walks one level out.
-	//
-	// Edges escalate on this step too, so a single click on an already-selected
-	// edge walks out to its transparentBounds parent, consistent with a shape.
-	// The escalate also fires on the second click of a double-click, but that no
-	// longer drops the edge-label insert (the reason the earlier !isEdge guard
-	// existed): selecting the parent is a selection-only change, so the view
-	// keeps the edge's cached state and shape node (only handlers are rebuilt,
-	// cell states are not). firstClickState/firstClickSource (recorded in
-	// Graph.click from the cached hit-test, not the live selection) therefore
-	// still match in insertTextForEvent, and addText positions the label from
-	// the same cached state, so the label is inserted on the native dblclick.
-	if (cell != null &&
+	// Only explicitly parent-first groups retain click cycling. Ordinary
+	// selection stays on the visible child regardless of the prior selection.
+	if (cell != null && this.getSelectionContainerHandle(evt) == null &&
 		!this.isToggleEvent(evt) && this.getSelectionCount() == 1)
 	{
 		var selected = this.getSelectionCell();
@@ -11560,7 +11557,8 @@ Graph.prototype.selectCellForEvent = function(cell, evt)
 		{
 			var parent = this.model.getParent(cell);
 
-			if (parent != null && this.isTransparentBounds(parent))
+			if (parent != null && this.isTransparentBounds(parent) &&
+				this.isSelectParentFirst(parent))
 			{
 				cell = parent;
 			}
@@ -12745,6 +12743,329 @@ Graph.prototype.isContainer = function(cell)
 };
 
 /**
+ * Groups and containers whose children can be selected independently.
+ * Shape parts and tables retain their own selection rules.
+ */
+Graph.prototype.isSelectionContainer = function(cell)
+{
+	return cell != null && this.model.isVertex(cell) && !this.isPart(cell) &&
+		!this.isTable(cell) && (this.isContainer(cell) ||
+		this.isTransparentBounds(cell) || mxUtils.indexOf(
+			mxUtils.getStylenames(this.model.getStyle(cell) || ''), 'group') >= 0);
+};
+
+/**
+ * Hit testing for selection only. Connections and drop targets can still
+ * use the full container bounds through getCellAt.
+ */
+Graph.prototype.getSelectionCellAt = function(x, y)
+{
+	return this.getCellAt(x, y, null, null, null, mxUtils.bind(this, function(state, px, py)
+	{
+		return this.isSelectionContainer(state.cell) &&
+			!this.intersectsSelectionContainer(state, px, py);
+	}));
+};
+
+/**
+ * Transparent interiors do not select their container. Visible labels,
+ * swimlane headers and borders remain selectable, including when rotated.
+ * Coordinates are in the same view space as getScaledCellAt.
+ */
+Graph.prototype.intersectsSelectionContainer = function(state, x, y)
+{
+	var style = state.style;
+	var swimlane = this.isSwimlane(state.cell);
+	var fill = mxUtils.getValue(style, swimlane ?
+		mxConstants.STYLE_SWIMLANE_FILLCOLOR : mxConstants.STYLE_FILLCOLOR,
+		swimlane ? mxConstants.NONE : (state.shape != null ? state.shape.fill : null));
+	var transparent = fill == null || fill == mxConstants.NONE ||
+		mxUtils.getValue(style, mxConstants.STYLE_FILL_OPACITY, 100) == 0 ||
+		mxUtils.getValue(style, mxConstants.STYLE_OPACITY, 100) == 0;
+
+	if (!transparent)
+	{
+		return true;
+	}
+
+	if (state.text != null && state.text.boundingBox != null &&
+		mxUtils.contains(state.text.boundingBox, x, y))
+	{
+		return true;
+	}
+
+	var pt = new mxPoint(x, y);
+	var alpha = mxUtils.toRadians(mxUtils.getValue(style, mxConstants.STYLE_ROTATION, 0));
+
+	if (alpha != 0)
+	{
+		pt = mxUtils.getRotatedPoint(pt, Math.cos(-alpha), Math.sin(-alpha),
+			new mxPoint(state.getCenterX(), state.getCenterY()));
+	}
+
+	if (swimlane)
+	{
+		var size = this.getActualStartSize(state.cell, true);
+		var scale = this.view.scale;
+		var content = new mxRectangle(state.x + size.x * scale,
+			state.y + size.y * scale, state.width - (size.x + size.width) * scale,
+			state.height - (size.y + size.height) * scale);
+
+		if (!mxUtils.contains(content, pt.x, pt.y))
+		{
+			return true;
+		}
+	}
+
+	var stroke = mxUtils.getValue(style, mxConstants.STYLE_STROKECOLOR,
+		state.shape != null ? state.shape.stroke : null);
+	var tolerance = this.tolerance / (this.useCssTransforms ? this.currentScale : 1);
+
+	return stroke != null && stroke != mxConstants.NONE &&
+		mxUtils.getValue(style, mxConstants.STYLE_STROKE_OPACITY, 100) != 0 &&
+		mxUtils.getValue(style, mxConstants.STYLE_OPACITY, 100) != 0 &&
+		(pt.x <= state.x + tolerance || pt.x >= state.x + state.width - tolerance ||
+		pt.y <= state.y + tolerance || pt.y >= state.y + state.height - tolerance);
+};
+
+/**
+ * Explicit parent handles bypass child-to-parent selection propagation.
+ */
+Graph.prototype.getSelectionContainerHandle = function(evt)
+{
+	var node = mxEvent.getSource(evt);
+
+	while (node != null && node != this.container)
+	{
+		if (node.selectionContainerCell != null)
+		{
+			return node.selectionContainerCell;
+		}
+
+		node = node.parentNode;
+	}
+
+	return null;
+};
+
+Graph.prototype.clearSelectionContainerHints = function()
+{
+	var hints = this.selectionContainerHints || [];
+
+	for (var i = 0; i < hints.length; i++)
+	{
+		hints[i].outline.destroy();
+		hints[i].handle.destroy();
+	}
+
+	this.selectionContainerHints = [];
+	this.selectionContainerHoverCell = null;
+};
+
+/**
+ * Labels both hover handles and selected ancestors with the same hierarchy
+ * depth (outermost container is level 1). SVG needs a title element.
+ */
+Graph.prototype.updateSelectionContainerHandleTitle = function(node, cell)
+{
+	var label = this.getLabel(cell);
+
+	if (this.isHtmlLabel(cell))
+	{
+		var div = document.createElement('div');
+		div.innerHTML = Graph.sanitizeHtml(label);
+		label = div.textContent;
+	}
+
+	var depth = 0;
+	var parent = cell;
+
+	while (parent != null && parent != this.getCurrentRoot())
+	{
+		if (this.isSelectionContainer(parent))
+		{
+			depth++;
+		}
+
+		parent = this.model.getParent(parent);
+	}
+
+	label = (label || mxResources.get('group')) + ' (' + depth + ')';
+	node.setAttribute('title', label);
+
+	if (node.ownerSVGElement != null)
+	{
+		var title = document.createElementNS(mxConstants.NS_SVG, 'title');
+		mxUtils.write(title, label);
+		node.appendChild(title);
+	}
+};
+
+/**
+ * Shows ancestors without changing the selection model. Blank space within
+ * their bounds keeps the handles reachable from the hovered child.
+ */
+Graph.prototype.initSelectionContainerHints = function()
+{
+	var graph = this;
+	this.selectionContainerHints = [];
+	var clear = mxUtils.bind(this, this.clearSelectionContainerHints);
+	var listener = {
+		mouseDown: function() {},
+		mouseUp: function() {},
+		mouseMove: function(sender, me)
+		{
+			if (!graph.isEnabled() || graph.isEditing() || graph.isMouseDown ||
+				graph.panningHandler.isActive())
+			{
+				return;
+			}
+
+			if (graph.getSelectionContainerHandle(me.getEvent()) != null)
+			{
+				return;
+			}
+
+			var cell = me.getCell();
+			var locked = graph.getLockedGroupAncestor(cell);
+			cell = locked != null ? locked : cell;
+
+			// A transparent interior can hit a background cell. Keep the
+			// existing handles reachable across that background as well.
+			if (cell == null || !graph.selectionContainerHints.some(function(hint)
+			{
+				return graph.model.isAncestor(hint.cell, cell);
+			}))
+			{
+				var x = me.getGraphX();
+				var y = me.getGraphY();
+				var scale = graph.useCssTransforms ? graph.currentScale : 1;
+
+				if (graph.useCssTransforms)
+				{
+					x = x / scale - graph.currentTranslate.x;
+					y = y / scale - graph.currentTranslate.y;
+				}
+
+				for (var i = 0; i < graph.selectionContainerHints.length; i++)
+				{
+					var bounds = graph.selectionContainerHints[i].bounds.clone();
+					bounds.grow(32 / scale);
+
+					if (mxUtils.contains(bounds, x, y))
+					{
+						return;
+					}
+				}
+			}
+
+			if (cell != graph.selectionContainerHoverCell)
+			{
+				graph.showSelectionContainerHints(cell);
+			}
+		}
+	};
+
+	var selectionChanged = function()
+	{
+		if (!graph.isMouseDown)
+		{
+			clear();
+		}
+	};
+	this.addMouseListener(listener);
+	this.addListener(mxEvent.ESCAPE, clear);
+	this.addListener(mxEvent.START_EDITING, clear);
+	this.model.addListener(mxEvent.CHANGE, clear);
+	this.selectionModel.addListener(mxEvent.CHANGE, selectionChanged);
+	this.view.addListener(mxEvent.SCALE, clear);
+	this.view.addListener(mxEvent.TRANSLATE, clear);
+	this.view.addListener(mxEvent.SCALE_AND_TRANSLATE, clear);
+	mxEvent.addListener(this.container, 'mouseleave', clear);
+
+	var destroy = this.destroy;
+	this.destroy = function()
+	{
+		clear();
+		this.removeMouseListener(listener);
+		this.removeListener(clear);
+		this.model.removeListener(clear);
+		this.selectionModel.removeListener(selectionChanged);
+		this.view.removeListener(clear);
+		mxEvent.removeListener(this.container, 'mouseleave', clear);
+		destroy.apply(this, arguments);
+	};
+};
+
+Graph.prototype.showSelectionContainerHints = function(cell)
+{
+	this.clearSelectionContainerHints();
+	this.selectionContainerHoverCell = cell;
+	var scale = this.useCssTransforms ? this.currentScale : 1;
+	var occupied = [];
+
+	while (cell != null && cell != this.getCurrentRoot())
+	{
+		if (this.isSelectionContainer(cell))
+		{
+			var state = this.view.getState(cell);
+
+			// Selected ancestors already have a border and a move handle.
+			if (state != null && !this.selectionCellsHandler.isHandled(cell) &&
+				this.isCellSelectable(cell) && !this.isCellLocked(cell))
+			{
+				var rotation = mxUtils.getValue(state.style, mxConstants.STYLE_ROTATION, 0);
+				var outline = new mxRectangleShape(mxRectangle.fromRectangle(state),
+					null, mxConstants.VERTEX_SELECTION_COLOR, 1 / scale);
+				outline.isDashed = true;
+				outline.rotation = rotation;
+				outline.pointerEvents = false;
+				// SVG stroke tolerance creates its own hit target even when
+				// pointerEvents is false. Hints must not cover inner handles.
+				outline.svgStrokeTolerance = 0;
+				outline.init(this.view.getOverlayPane());
+				outline.redraw();
+
+				var offset = this.getNestedCornerIconOffset(cell, state.x, state.y,
+					mxUtils.bind(this, this.isMoveIconVisible)) / scale;
+				var point = new mxPoint(state.x - (12 / scale) - offset,
+					state.y - (12 / scale) - offset);
+				var alpha = mxUtils.toRadians(rotation);
+				point = mxUtils.getRotatedPoint(point, Math.cos(alpha), Math.sin(alpha),
+					new mxPoint(state.getCenterX(), state.getCenterY()));
+				var bounds = new mxRectangle(point.x - 8 / scale, point.y - 8 / scale,
+					16 / scale, 16 / scale);
+
+				for (var i = 0; i < occupied.length; i++)
+				{
+					if (mxUtils.intersects(bounds, occupied[i]))
+					{
+						bounds.x -= 24 / scale;
+						bounds.y -= 24 / scale;
+						i = -1;
+					}
+				}
+
+				occupied.push(bounds);
+				var handle = new mxImageShape(bounds, HoverIcons.prototype.moveHandle.src);
+				handle.preserveImageAspect = false;
+				handle.init(this.view.getOverlayPane());
+				handle.redraw();
+				handle.node.style.cursor = this.isCellMovable(cell) ? 'move' : 'pointer';
+				handle.node.selectionContainerCell = cell;
+				this.updateSelectionContainerHandleTitle(handle.node, cell);
+				mxEvent.redirectMouseEvents(handle.node, this, state);
+				var area = mxUtils.getBoundingBox(state, rotation) || mxRectangle.fromRectangle(state);
+				area.add(bounds);
+				this.selectionContainerHints.push({cell: cell, outline: outline, handle: handle, bounds: area});
+			}
+		}
+
+		cell = this.model.getParent(cell);
+	}
+};
+
+/**
  * Width in pixels of the band along a container's border in which
  * connections are targeted at the container even if a child overlaps
  * the border. 0 disables the border band.
@@ -12833,7 +13154,7 @@ Graph.prototype.isTransparentBounds = function(cell)
 /**
  * Returns true when the cell should show a draggable move handle icon at the
  * top-left of its bounds. Controlled by the moveIcon style key; defaults to
- * true for transparentBounds cells, false otherwise.
+ * true for vertices other than shape parts. Explicit moveIcon=0 hides it.
  */
 Graph.prototype.isMoveIconVisible = function(cell)
 {
@@ -12845,7 +13166,7 @@ Graph.prototype.isMoveIconVisible = function(cell)
 		return value == '1';
 	}
 
-	return this.isTransparentBounds(cell);
+	return this.model.isVertex(cell) && !this.isPart(cell);
 };
 
 /**
@@ -17864,7 +18185,8 @@ if (typeof mxVertexHandler !== 'undefined')
 		var graphIsCellEditable = Graph.prototype.isCellEditable;
 		Graph.prototype.isCellEditable = function(cell)
 		{
-			if (cell == null || !graphIsCellEditable.apply(this, arguments))
+			if (cell == null || this.getLockedGroupAncestor(this.model.getParent(cell)) != null ||
+				!graphIsCellEditable.apply(this, arguments))
 			{
 				return false;
 			}
@@ -24889,12 +25211,18 @@ if (typeof mxVertexHandler !== 'undefined')
 		 *   - transparentBounds=1 (without selectParentFirst): stop at the
 		 *     group boundary so children are selectable directly, like
 		 *     children of a swimlane.
-		 *   - Otherwise: fall through to base propagation (groups propagate
-		 *     up to parent first; swimlanes stop on the clicked child).
+		 *   - Ordinary groups and containers: stop on the child for normal
+		 *     clicks. Shape parts and modifier clicks retain base propagation.
+		 *   - Otherwise: fall through to base propagation.
 		 */
 		var mxGraphHandlerIsPropagateSelectionCell = mxGraphHandler.prototype.isPropagateSelectionCell;
 		mxGraphHandler.prototype.isPropagateSelectionCell = function(cell, immediate, me)
 		{
+			if (this.graph.getSelectionContainerHandle(me.getEvent()) == cell)
+			{
+				return false;
+			}
+
 			var parent = this.graph.model.getParent(cell);
 
 			if (parent != null)
@@ -24909,7 +25237,10 @@ if (typeof mxVertexHandler !== 'undefined')
 						!this.graph.isSiblingSelected(cell);
 				}
 
-				if (this.graph.isTransparentBounds(parent))
+				if (this.graph.isTransparentBounds(parent) ||
+					(this.graph.isSelectionContainer(parent) &&
+					!this.graph.isPart(cell) &&
+					!this.graph.isToggleEvent(me.getEvent())))
 				{
 					return false;
 				}
@@ -26028,6 +26359,11 @@ if (typeof mxVertexHandler !== 'undefined')
 						this.shape.bounds.x = x - size / 2;
 						this.shape.bounds.y = y - size / 2;
 						this.shape.redraw();
+
+						if (graph.isSelectionContainer(cell))
+						{
+							graph.updateSelectionContainerHandleTitle(this.shape.node, cell);
+						}
 					}
 				};
 
