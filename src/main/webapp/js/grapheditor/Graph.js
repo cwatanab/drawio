@@ -12777,11 +12777,43 @@ Graph.prototype.isSelectionBackground = function(state)
  */
 Graph.prototype.getSelectionCellAt = function(x, y)
 {
-	return this.getCellAt(x, y, null, null, null, mxUtils.bind(this, function(state, px, py)
+	if (this.useCssTransforms)
 	{
-		return this.isSelectionBackground(state) &&
-			!this.intersectsSelectionContainer(state, px, py);
-	}));
+		x = x / this.currentScale - this.currentTranslate.x;
+		y = y / this.currentScale - this.currentTranslate.y;
+	}
+
+	// Do not intersect the result with the strict vertex bounds from getCellAt:
+	// that would discard the outer half of the selectable border tolerance.
+	var visit = mxUtils.bind(this, function(parent)
+	{
+		for (var i = this.model.getChildCount(parent) - 1; i >= 0; i--)
+		{
+			var cell = this.model.getChildAt(parent, i);
+			var result = visit(cell);
+
+			if (result != null)
+			{
+				return result;
+			}
+
+			if (this.isCellVisible(cell) &&
+				(this.model.isVertex(cell) || this.model.isEdge(cell)))
+			{
+				var state = this.view.getState(cell);
+
+				if (state != null && (this.isSelectionBackground(state) ?
+					this.intersectsSelectionContainer(state, x, y) : this.intersects(state, x, y)))
+				{
+					return cell;
+				}
+			}
+		}
+
+		return null;
+	});
+
+	return visit(this.getCurrentRoot() || this.model.getRoot());
 };
 
 /**
@@ -12800,11 +12832,6 @@ Graph.prototype.intersectsSelectionContainer = function(state, x, y)
 		mxUtils.getValue(style, mxConstants.STYLE_FILL_OPACITY, 100) == 0 ||
 		mxUtils.getValue(style, mxConstants.STYLE_OPACITY, 100) == 0;
 
-	if (!transparent)
-	{
-		return true;
-	}
-
 	if (state.text != null && state.text.boundingBox != null &&
 		mxUtils.contains(state.text.boundingBox, x, y))
 	{
@@ -12820,7 +12847,21 @@ Graph.prototype.intersectsSelectionContainer = function(state, x, y)
 			new mxPoint(state.getCenterX(), state.getCenterY()));
 	}
 
-	if (swimlane)
+	var tolerance = this.tolerance / (this.useCssTransforms ? this.currentScale : 1);
+	var inside = mxUtils.contains(state, pt.x, pt.y);
+
+	if (!transparent)
+	{
+		return inside;
+	}
+
+	if (pt.x < state.x - tolerance || pt.x > state.x + state.width + tolerance ||
+		pt.y < state.y - tolerance || pt.y > state.y + state.height + tolerance)
+	{
+		return false;
+	}
+
+	if (swimlane && inside)
 	{
 		var size = this.getActualStartSize(state.cell, true);
 		var scale = this.view.scale;
@@ -12836,8 +12877,6 @@ Graph.prototype.intersectsSelectionContainer = function(state, x, y)
 
 	var stroke = mxUtils.getValue(style, mxConstants.STYLE_STROKECOLOR,
 		state.shape != null ? state.shape.stroke : null);
-	var tolerance = this.tolerance / (this.useCssTransforms ? this.currentScale : 1);
-
 	return stroke != null && stroke != mxConstants.NONE &&
 		mxUtils.getValue(style, mxConstants.STYLE_STROKE_OPACITY, 100) != 0 &&
 		mxUtils.getValue(style, mxConstants.STYLE_OPACITY, 100) != 0 &&
