@@ -15,17 +15,34 @@ Draw.loadPlugin(function(ui)
 	var confirmationDialog = null;
 	var graphContainer = graph.container;
 	var properties = [
-		['expand', '子に合わせて親のサイズを拡張する', '1', '0'],
-		['autosize', 'テキストに合わせてサイズを調整する', '1', '0'],
-		['aspect', '縦横比を固定する', 'fixed', '0'],
-		['resizable', 'リサイズを禁止する', '0', '1'],
-		['movable', '位置を固定する', '0', '1'],
-		['container', 'コンテナにする', '1', '0'],
-		['noLabel', 'ラベルを隠す', '1', '0'],
-		['snapToPoint', '接続ポイントにスナップする', '1', '0'],
-		['constraintPoints', '接続ポイントを制限する'],
-		['allowArrows', '接続用の矢印を隠す', '0', '1'],
-		['connectable', '接続できなくする', '0', '1']
+		{key: 'size', label: 'サイズ', items: [
+			['autosize', 'テキストに合わせてサイズを調整する', '1', '0'],
+			['aspect', '縦横比を固定する', 'fixed', '0']
+		]},
+		{key: 'label', label: 'ラベル', items: [
+			['noLabel', 'ラベルを隠す', '1', '0'],
+			['movableLabel', 'ラベルを移動できるようにする', '1', '0'],
+			['editable', 'ラベルの編集を禁止する', '0', '1']
+		]},
+		{key: 'container', label: 'コンテナ', items: [
+			['container', 'コンテナにする', '1', '0'],
+			['expand', '子に合わせて親のサイズを拡張する', '1', '0'],
+			['recursiveResize', '親のリサイズに合わせて子もリサイズする', '1', '0'],
+			['collapsible', '折りたたみを許可する', '1', '0']
+		]},
+		{key: 'connections', label: '接続', items: [
+			['snapToPoint', '接続ポイントにスナップする', '1', '0'],
+			['constraintPoints', '接続ポイントを制限する'],
+			['allowArrows', '接続用の矢印を隠す', '0', '1'],
+			['connectable', '接続できなくする', '0', '1']
+		]},
+		{key: 'restrictions', label: '操作の制限', items: [
+			['movable', '位置を固定する', '0', '1'],
+			['resizable', 'リサイズを禁止する', '0', '1'],
+			['rotatable', '回転を禁止する', '0', '1'],
+			['cloneable', '複製を禁止する', '0', '1'],
+			['deletable', '削除を禁止する', '0', '1']
+		]}
 	];
 	var presets = [
 		['all', '上下左右', '[[0.5,0],[1,0.5],[0.5,1],[0,0.5]]'],
@@ -82,9 +99,12 @@ Draw.loadPlugin(function(ui)
 		return validateStyle(result);
 	}
 
-	function editable(cell)
+	function editable(cell, editingProperty)
 	{
-		return model.contains(cell) && model.isVertex(cell) && graph.isCellEditable(cell) &&
+		// Label editing can be re-enabled without granting other style changes.
+		return model.contains(cell) && model.isVertex(cell) &&
+			(graph.isCellEditable(cell) || (editingProperty && graph.isCellsEditable() &&
+				graph.getCurrentCellStyle(cell).editable == '0')) &&
 			!graph.isCellLocked(cell) && graph.getLockedGroupAncestor(model.getParent(cell)) == null &&
 			!graph.isTableRow(cell) && !graph.isTableCell(cell) && !graph.isPart(cell);
 	}
@@ -94,14 +114,16 @@ Draw.loadPlugin(function(ui)
 		return {cells: graph.getSelectionCells().slice(), root: model.getRoot(), page: ui.currentPage};
 	}
 
-	function invalid(ctx)
+	function invalid(ctx, editingProperty)
 	{
 		if (disposed || !graph.isEnabled()) return '読み取り専用では変更できません。';
 		var current = graph.getSelectionCells();
+		var selected = new Set(current);
 		if (ctx.root != model.getRoot() || ctx.page != ui.currentPage || ctx.cells.length == 0 ||
-			current.length != ctx.cells.length || !ctx.cells.every(function(cell) { return current.indexOf(cell) >= 0; }))
+			current.length != ctx.cells.length || !ctx.cells.every(function(cell) { return selected.has(cell); }))
 			return '対象の選択またはページが変わりました。メニューを開き直してください。';
-		if (!ctx.cells.every(editable)) return '接続線、ロック中の図形、表の行・セル、部品には適用できません。';
+		if (!ctx.cells.every(function(cell) { return editable(cell, editingProperty); }))
+			return '接続線、ロック中・ラベル編集禁止の図形、表の行・セル、部品には適用できません。';
 		return null;
 	}
 
@@ -112,11 +134,14 @@ Draw.loadPlugin(function(ui)
 		if (key == 'container') return graph.isContainer(cell);
 		if (key == 'autosize') return graph.isAutoSizeCell(cell);
 		if (key == 'connectable') return !graph.isCellConnectable(cell);
+		if (key == 'movableLabel') return graph.isLabelMovable(cell);
 		if (key == 'expand') return style.expand != null ? style.expand != '0' : graph.isExtendParents() && !graph.isTable(cell);
+		if (key == 'collapsible' && style.collapsible == null) return graph.isContainer(cell);
 		var value = style[key];
 		if (value == null)
 		{
-			value = ['resizable', 'movable', 'allowArrows'].indexOf(key) >= 0 ? '1' : '0';
+			value = ['resizable', 'movable', 'rotatable', 'cloneable', 'deletable',
+				'editable', 'recursiveResize', 'allowArrows'].indexOf(key) >= 0 ? '1' : '0';
 		}
 		return String(value) == prop[2];
 	}
@@ -141,17 +166,22 @@ Draw.loadPlugin(function(ui)
 	{
 		if (cells.length == 0) return null;
 		var first = value(cells[0]);
-		return cells.every(function(cell) { return value(cell) === first; }) ? first : null;
+		for (var i = 1; i < cells.length; i++)
+		{
+			if (value(cells[i]) !== first) return null;
+		}
+		return first;
 	}
 
 	function apply(ctx, values)
 	{
-		var error = invalid(ctx);
+		var keys = Object.keys(values);
+		var editingProperty = keys.length == 1 && keys[0] == 'editable';
+		var error = invalid(ctx, editingProperty);
 		if (error != null) { ui.handleError(new Error(error)); return; }
 		graph.stopEditing(false);
-		error = invalid(ctx);
+		error = invalid(ctx, editingProperty);
 		if (error != null) { ui.handleError(new Error(error)); return; }
-		var keys = Object.keys(values);
 		var changes = model.currentEdit.changes;
 		var start = changes.length;
 		model.beginUpdate();
@@ -417,30 +447,34 @@ Draw.loadPlugin(function(ui)
 				};
 				return el;
 			}
-			var parent = item('プロパティ', null, null, undefined, 'properties', true);
-			properties.forEach(function(prop)
+			var propertyParent = item('プロパティ', null, null, undefined, 'properties', true);
+			properties.forEach(function(group)
 			{
-				if (prop[0] == 'constraintPoints')
+				var parent = item(group.label, null, propertyParent, undefined, 'group-' + group.key, true);
+				group.items.forEach(function(prop)
 				{
-					var current = common(ctx.cells, constraint);
-					var pointParent = item(prop[1] + (current == 'custom' ? '（カスタム）' : ''),
-						null, parent, current === null ? null : undefined, prop[0], true);
-					presets.forEach(function(preset)
+					if (prop[0] == 'constraintPoints')
 					{
-						item(preset[1], function() { apply(ctx, {points: preset[2]}); }, pointParent,
-							current === preset[0], 'points-' + preset[0]);
-					});
-				}
-				else
-				{
-					var state = common(ctx.cells, function(cell) { return checked(cell, prop); });
-					item(prop[1], function()
+						var current = common(ctx.cells, constraint);
+						var pointParent = item(prop[1] + (current == 'custom' ? '（カスタム）' : ''),
+							null, parent, current === null ? null : undefined, prop[0], true);
+						presets.forEach(function(preset)
+						{
+							item(preset[1], function() { apply(ctx, {points: preset[2]}); }, pointParent,
+								current === preset[0], 'points-' + preset[0]);
+						});
+					}
+					else
 					{
-						var values = {};
-						values[prop[0]] = state === true ? prop[3] : prop[2];
-						apply(ctx, values);
-					}, parent, state, prop[0]);
-				}
+						var state = common(ctx.cells, function(cell) { return checked(cell, prop); });
+						item(prop[1], function()
+						{
+							var values = {};
+							values[prop[0]] = state === true ? prop[3] : prop[2];
+							apply(ctx, values);
+						}, parent, state, prop[0], prop[0] == 'editable' ? invalid(ctx, true) == null : reason == null);
+					}
+				});
 			});
 			var styleParent = item('スタイル', null, null, undefined, 'styles', true);
 			item('スタイルを管理', function() { manage(cell); }, styleParent, undefined, 'manage', true);

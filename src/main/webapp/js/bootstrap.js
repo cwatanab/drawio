@@ -332,9 +332,6 @@ else
         {
             mxscript('js/app.min.js', function()
             {
-                mxScriptsLoaded = true;
-                checkAllLoaded();
-                
                 // Electron
                 if (mxIsElectron)
                 {
@@ -362,7 +359,11 @@ else
                                         // defined.
                                         mxscript('js/plantuml/drawio-plantuml.min.js', function()
                                         {
-                                            mxscript('js/PostConfig.js');
+                                            mxscript('js/PostConfig.js', function()
+                                            {
+                                                mxScriptsLoaded = true;
+                                                checkAllLoaded();
+                                            });
                                         });
                                     });
                                 });
@@ -370,9 +371,15 @@ else
                         });
                     });
                 }
-                else if (!supportedDomain)
+                else
                 {
-                    mxscript('js/PostConfig.js');
+                    mxScriptsLoaded = true;
+                    checkAllLoaded();
+                    
+                    if (!supportedDomain)
+                    {
+                        mxscript('js/PostConfig.js');
+                    }
                 }
             });
         };
