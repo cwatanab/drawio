@@ -39,29 +39,18 @@ Draw.loadPlugin(function(ui)
 		return supported && !disposed && tab == 'hierarchy' && ui.isFormatPanelVisible();
 	});
 
-	var menu = ui.menus.get('extras') || ui.menus.get('view');
-	var originalMenu = menu != null ? menu.funct : null;
-	var menuWrapper = function(m, parent)
-	{
-		originalMenu.apply(this, arguments);
-		if (!disposed) ui.menus.addMenuItems(m, ['-', actionName], parent);
-	};
-	if (menu != null) menu.funct = menuWrapper;
-
 	ui.hierarchyViewer = {destroy: destroy};
 	ui.destroyFunctions.push(destroy);
 	if (!supported) return;
 
 	var style = document.createElement('style');
 	style.textContent =
-		'.geHierarchyTabs{display:flex;height:34px;position:absolute;inset:0 0 auto;}' +
-		'.geHierarchyTabs button{margin:0;border-radius:0;color:inherit;}' +
 		'.geHierarchyPane{position:absolute;inset:34px 0 0;display:flex;flex-direction:column;white-space:normal;}' +
 		'.geHierarchyTree{overflow:auto;flex:1;min-height:0;padding:4px 0;}' +
 		'.geHierarchyRow{display:flex;align-items:center;gap:3px;min-height:30px;border:2px solid transparent;box-sizing:border-box;}' +
 		'.geHierarchyRow:hover{background:light-dark(var(--highlight-color),var(--dark-highlight-color));}' +
 		'.geHierarchyRow[aria-selected=true]{background:light-dark(var(--accent-color),var(--dark-accent-color));color:light-dark(var(--accent-text-color),var(--dark-accent-text-color));}' +
-		'.geHierarchyRow:focus-visible,.geHierarchyTabs button:focus-visible{outline:2px solid Highlight;outline-offset:-2px;}' +
+		'.geHierarchyRow:focus-visible,.geFormatTitle[data-hierarchy-tab]:focus-visible{outline:2px solid Highlight;outline-offset:-2px;}' +
 		'.geHierarchyLabel{flex:1;min-width:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}' +
 		'.geHierarchyRow button{flex:none;margin:0;padding:2px;min-width:20px;color:inherit;background:transparent;border:0;}' +
 		'.geHierarchyRow button:disabled{opacity:.35;}' +
@@ -76,47 +65,6 @@ Draw.loadPlugin(function(ui)
 
 	var originalOverflow = host.style.overflow;
 	var originalGutter = host.style.scrollbarGutter;
-	host.style.overflow = 'hidden';
-	host.style.scrollbarGutter = 'auto';
-	var formatPane = document.createElement('div');
-	formatPane.className = 'geFormatContainer';
-	formatPane.style.cssText = 'position:absolute;inset:34px 0 0;width:auto;';
-	formatPane.setAttribute('role', 'tabpanel');
-	formatPane.setAttribute('aria-label', '書式');
-	while (host.firstChild != null) formatPane.appendChild(host.firstChild);
-	format.container = formatPane;
-	host.appendChild(formatPane);
-
-	var tabs = document.createElement('div');
-	tabs.className = 'geHierarchyTabs';
-	tabs.setAttribute('role', 'tablist');
-	tabs.setAttribute('aria-label', '右サイドバー');
-	var tabButtons = {};
-	['format', 'hierarchy'].forEach(function(name)
-	{
-		var button = document.createElement('button');
-		button.className = 'geFormatTitle';
-		button.type = 'button';
-		button.textContent = name == 'format' ? '書式' : '階層';
-		button.setAttribute('role', 'tab');
-		button.dataset.hierarchyTab = name;
-		button.onmousedown = function(evt) { evt.stopPropagation(); };
-		button.onclick = function() { selectTab(name, true); };
-		button.onkeydown = function(evt)
-		{
-			if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(evt.key) >= 0)
-			{
-				mxEvent.consume(evt);
-				selectTab(evt.key == 'Home' ? 'format' : evt.key == 'End' ? 'hierarchy' :
-					name == 'format' ? 'hierarchy' : 'format', false);
-				tabButtons[tab].focus();
-			}
-		};
-		tabButtons[name] = button;
-		tabs.appendChild(button);
-	});
-	host.appendChild(tabs);
-
 	var pane = document.createElement('div');
 	pane.className = 'geHierarchyPane';
 	pane.setAttribute('role', 'tabpanel');
@@ -132,7 +80,80 @@ Draw.loadPlugin(function(ui)
 	status.className = 'geHierarchyStatus';
 	status.setAttribute('role', 'status');
 	pane.appendChild(status);
-	host.appendChild(pane);
+
+	var hierarchyTab = document.createElement('div');
+	hierarchyTab.className = 'geFormatTitle';
+	hierarchyTab.setAttribute('role', 'tab');
+	hierarchyTab.setAttribute('title', '階層');
+	hierarchyTab.dataset.hierarchyTab = 'hierarchy';
+	var hierarchyTabLabel = document.createElement('div');
+	mxUtils.write(hierarchyTabLabel, '階層');
+	hierarchyTab.appendChild(hierarchyTabLabel);
+
+	function getFormatActiveIndex()
+	{
+		var ss = ui.getSelectionState();
+		var containsLabel = ss.containsLabel && !ss.transparentBounds;
+		var idx = containsLabel ? format.labelIndex :
+			(graph.isSelectionEmpty() ? format.diagramIndex : format.currentIndex);
+		if (idx == null || idx < 0 || (format.panels != null && idx >= format.panels.length))
+		{
+			idx = 0;
+		}
+		return idx;
+	}
+
+	function setFormatPanelsVisible(visible, activeIndex)
+	{
+		if (format.panels != null)
+		{
+			for (var i = 0; i < format.panels.length; i++)
+			{
+				if (format.panels[i].container != null)
+				{
+					format.panels[i].container.style.display = (visible && i == activeIndex) ? '' : 'none';
+				}
+			}
+		}
+	}
+
+	function handleTabKeydown(evt)
+	{
+		if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(evt.key) >= 0)
+		{
+			mxEvent.consume(evt);
+			var titleContainer = host.querySelector('.geFormatTitleContainer');
+			if (titleContainer == null) return;
+			var tabs = Array.from(titleContainer.children).filter(function(c)
+			{
+				return c.style.display != 'none';
+			});
+			var curIdx = tabs.indexOf(document.activeElement);
+			if (curIdx < 0) curIdx = tabs.indexOf(this);
+			var targetIdx;
+			if (evt.key == 'Home') targetIdx = 0;
+			else if (evt.key == 'End') targetIdx = tabs.length - 1;
+			else if (evt.key == 'ArrowLeft') targetIdx = (curIdx - 1 + tabs.length) % tabs.length;
+			else if (evt.key == 'ArrowRight') targetIdx = (curIdx + 1) % tabs.length;
+			var targetTab = tabs[targetIdx];
+			if (targetTab == hierarchyTab)
+			{
+				selectTab('hierarchy', false);
+				hierarchyTab.focus();
+			}
+			else
+			{
+				var formatIdx = Array.from(titleContainer.children).indexOf(targetTab);
+				var ss = ui.getSelectionState();
+				var containsLabel = ss.containsLabel && !ss.transparentBounds;
+				if (containsLabel) format.labelIndex = formatIdx;
+				else if (graph.isSelectionEmpty()) format.diagramIndex = formatIdx;
+				else format.currentIndex = formatIdx;
+				selectTab('format', false, formatIdx);
+				targetTab.focus();
+			}
+		}
+	}
 
 	function listen(source, event, fn)
 	{
@@ -580,29 +601,115 @@ Draw.loadPlugin(function(ui)
 		invalidate();
 	}
 
-	function selectTab(name, focus)
+	function selectTab(name, focus, formatIndex)
 	{
 		if (editing != null) editing.finish(false);
 		try { localStorage.setItem(storageKey, name); }
 		catch (err) { name = 'format'; }
 		tab = name;
-		formatPane.style.display = name == 'format' ? '' : 'none';
-		pane.style.display = name == 'hierarchy' ? 'flex' : 'none';
-		Object.keys(tabButtons).forEach(function(key)
+		var titleContainer = host.querySelector('.geFormatTitleContainer');
+		if (name == 'hierarchy')
 		{
-			var button = tabButtons[key];
-			button.setAttribute('aria-selected', String(key == name));
-			button.classList.toggle('geActiveFormatTitle', key == name);
-			button.tabIndex = key == name ? 0 : -1;
-		});
-		if (name == 'format') format.refresh();
-		else refreshTree();
-		if (focus && name == 'hierarchy')
+			setFormatPanelsVisible(false);
+			pane.style.display = 'flex';
+			host.style.overflow = 'hidden';
+			if (titleContainer != null)
+			{
+				Array.from(titleContainer.children).forEach(function(btn)
+				{
+					var isActive = (btn == hierarchyTab);
+					btn.classList.toggle('geActiveFormatTitle', isActive);
+					btn.setAttribute('aria-selected', String(isActive));
+					btn.tabIndex = isActive ? 0 : -1;
+				});
+			}
+			refreshTree();
+			if (focus)
+			{
+				if (rows.size > 0) focusRow(focusedCell);
+				else tree.focus();
+			}
+		}
+		else
 		{
-			if (rows.size > 0) focusRow(focusedCell);
-			else tree.focus();
+			pane.style.display = 'none';
+			host.style.overflow = originalOverflow;
+			var activeIndex = typeof formatIndex === 'number' ? formatIndex : getFormatActiveIndex();
+			setFormatPanelsVisible(true, activeIndex);
+			if (titleContainer != null)
+			{
+				Array.from(titleContainer.children).forEach(function(btn, i)
+				{
+					if (btn == hierarchyTab)
+					{
+						btn.classList.remove('geActiveFormatTitle');
+						btn.setAttribute('aria-selected', 'false');
+						btn.tabIndex = -1;
+					}
+					else
+					{
+						var isActive = (i == activeIndex);
+						btn.classList.toggle('geActiveFormatTitle', isActive);
+						btn.setAttribute('aria-selected', String(isActive));
+						btn.tabIndex = isActive ? 0 : -1;
+						if (focus && isActive) btn.focus();
+					}
+				});
+			}
 		}
 	}
+
+	function updateHierarchyUi()
+	{
+		if (disposed) return;
+		var titleContainer = host.querySelector('.geFormatTitleContainer');
+		if (titleContainer == null) return;
+
+		if (pane.parentNode != host)
+		{
+			host.appendChild(pane);
+		}
+
+		if (hierarchyTab.parentNode != titleContainer)
+		{
+			titleContainer.appendChild(hierarchyTab);
+		}
+
+		titleContainer.setAttribute('role', 'tablist');
+
+		hierarchyTab.onkeydown = handleTabKeydown;
+		hierarchyTab.onmousedown = function(evt) { evt.stopPropagation(); };
+		hierarchyTab.onclick = function() { selectTab('hierarchy', true); };
+
+		Array.from(titleContainer.children).forEach(function(child)
+		{
+			if (child == hierarchyTab) return;
+			child.setAttribute('role', 'tab');
+			child.onkeydown = handleTabKeydown;
+			child.onclick = function()
+			{
+				var fIndex = Array.from(titleContainer.children).indexOf(child);
+				var ss = ui.getSelectionState();
+				var containsLabel = ss.containsLabel && !ss.transparentBounds;
+				if (containsLabel) format.labelIndex = fIndex;
+				else if (graph.isSelectionEmpty()) format.diagramIndex = fIndex;
+				else format.currentIndex = fIndex;
+				selectTab('format', false, fIndex);
+			};
+		});
+
+		selectTab(tab, false);
+	}
+
+	var origImmediateRefresh = format.immediateRefresh;
+	format.immediateRefresh = function()
+	{
+		origImmediateRefresh.apply(this, arguments);
+		if (!disposed)
+		{
+			updateHierarchyUi();
+		}
+	};
 
 	listen(model, mxEvent.CHANGE, invalidate);
 	listen(graph.getSelectionModel(), mxEvent.CHANGE, updateSelection);
@@ -618,7 +725,7 @@ Draw.loadPlugin(function(ui)
 		if (saved == 'hierarchy') tab = saved;
 	}
 	catch (err) { tab = 'format'; }
-	selectTab(tab, false);
+	updateHierarchyUi();
 
 	function destroy()
 	{
@@ -628,17 +735,15 @@ Draw.loadPlugin(function(ui)
 		if (editing != null) editing.finish(false);
 		if (pending != null) window.clearTimeout(pending);
 		listeners.forEach(function(listener) { listener[0].removeListener(listener[1]); });
-		if (menu != null && menu.funct == menuWrapper) menu.funct = originalMenu;
 		if (supported)
 		{
-			format.container = host;
-			while (formatPane.firstChild != null) host.appendChild(formatPane.firstChild);
-			formatPane.remove();
-			tabs.remove();
+			format.immediateRefresh = origImmediateRefresh;
 			pane.remove();
 			style.remove();
+			hierarchyTab.remove();
 			host.style.overflow = originalOverflow;
 			host.style.scrollbarGutter = originalGutter;
+			format.immediateRefresh();
 		}
 		rows.clear();
 		ui.hierarchyViewer = null;
