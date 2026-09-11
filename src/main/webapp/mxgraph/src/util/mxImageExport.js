@@ -226,8 +226,11 @@ mxImageExport.prototype.drawText = function(state, canvas)
  * stroke grew those bounds, with the parity taken from the stroke width at
  * the scale of the output rather than the screen. Otherwise the content
  * shifts against the crop, adding padding on one side of the exported
- * image and clipping content on the other. Shape-specific overrides of
- * the screen offset (eg. mxText, mxImageShape) are used unchanged.
+ * image and clipping content on the other. Strokes thinner than a pixel
+ * at the output scale take the offset of a one pixel stroke, as on screen
+ * (see mxShape.getSvgScreenOffset), so that they stay aligned with the
+ * shapes around them. Shape-specific overrides of the screen offset (eg.
+ * mxText, mxImageShape) are used unchanged.
  */
 mxImageExport.prototype.getSvgShapeOffset = function(shape, canvas)
 {
@@ -240,7 +243,8 @@ mxImageExport.prototype.getSvgShapeOffset = function(shape, canvas)
 		Number(shape.stencil.strokewidth) : shape.strokewidth;
 	var scale = shape.scale * ((canvas.state != null) ? canvas.state.scale : 1);
 
-	return (shape.stroke != null && mxUtils.mod(Math.round(sw * scale), 2) == 1) ? 0.5 : 0;
+	return (shape.stroke != null && sw > 0 && mxUtils.mod(Math.max(1,
+		Math.round(sw * scale)), 2) == 1) ? 0.5 : 0;
 };
 
 /**

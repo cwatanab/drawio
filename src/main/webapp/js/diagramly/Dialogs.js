@@ -1454,7 +1454,7 @@ var ParseDialog = function(editorUi, title, defaultType)
 			// demand), so the dialog stays open until it succeeds (see okBtn).
 			if (editorUi.spinner.spin(document.body, mxResources.get('inserting')))
 			{
-				var insertPlantUml = mxUtils.bind(this, function(insertXml)
+				var insertPlantUml = mxUtils.bind(this, function(insertXml, warnings)
 				{
 					editorUi.spinner.stop();
 					editorUi.hideDialog();
@@ -1474,6 +1474,10 @@ var ParseDialog = function(editorUi, title, defaultType)
 					}
 
 					graph.scrollCellToVisible(graph.getSelectionCell());
+
+					// Reports what the converter could not use, after the
+					// insert is complete: the diagram stays inserted
+					editorUi.showPlantUmlWarnings(warnings);
 				});
 
 				var onPlantUmlError = mxUtils.bind(this, function(e)
@@ -1492,9 +1496,9 @@ var ParseDialog = function(editorUi, title, defaultType)
 				}
 				else
 				{
-					editorUi.parsePlantUmlDiagram(text, null, mxUtils.bind(this, function(xml)
+					editorUi.parsePlantUmlDiagram(text, null, mxUtils.bind(this, function(xml, warnings)
 					{
-						insertPlantUml(mxPlantUmlToDrawio.wrapGroup(xml, text, null));
+						insertPlantUml(mxPlantUmlToDrawio.wrapGroup(xml, text, null), warnings);
 					}), onPlantUmlError);
 				}
 			}
@@ -2146,7 +2150,14 @@ var ParseDialog = function(editorUi, title, defaultType)
 				else
 				{
 					editorUi.parsePlantUmlDiagram(textarea.value, null,
-						showPreview, onError);
+						function(xml, warnings)
+					{
+						showPreview(xml);
+
+						// Reports what the converter could not use, after the
+						// preview is up: the tooltip stays open
+						editorUi.showPlantUmlWarnings(warnings);
+					}, onError);
 				}
 			}
 		});
@@ -19318,11 +19329,15 @@ var ConnectionPointsDialog = function(editorUi, cell)
 
 			var dx = parseInt(dxInput.value) || 0;
 			var dy = parseInt(dyInput.value) || 0;
-			var constObj = new mxConnectionConstraint(new mxPoint(parseFloat((x / 100).toFixed(6)),
-				parseFloat((y / 100).toFixed(6))), false, null, dx, dy);
-			var cp = editingGraph.getConnectionPoint(state, constObj);
-
 			var cell = editingGraph.getSelectionCell();
+
+			// Points on the shape outline keep following it when their
+			// numbers are edited, dragged points have become fixed points
+			var perimeter = (cell != null && cell.constObj != null) ?
+				cell.constObj.perimeter : false;
+			var constObj = new mxConnectionConstraint(new mxPoint(parseFloat((x / 100).toFixed(6)),
+				parseFloat((y / 100).toFixed(6))), perimeter, null, dx, dy);
+			var cp = editingGraph.getConnectionPoint(state, constObj);
 
 			if (cell != null)
 			{
@@ -19340,7 +19355,12 @@ var ConnectionPointsDialog = function(editorUi, cell)
 		{
 			if (cp.constObj)
 			{
-				return {x: cp.constObj.point.x, y: cp.constObj.point.y, dx: cp.constObj.dx, dy: cp.constObj.dy};
+				// The perimeter flag must survive the round trip or default
+				// points that are projected onto the outline, eg. the sloped
+				// sides of a trapezoid, end up on the bounding box after an
+				// apply without any changes [jgraph/drawio#4821]
+				return {x: cp.constObj.point.x, y: cp.constObj.point.y,
+					perimeter: cp.constObj.perimeter, dx: cp.constObj.dx, dy: cp.constObj.dy};
 			}
 
 			// Two decimal places (mxUtils.format) are not enough precision as
@@ -19371,7 +19391,7 @@ var ConnectionPointsDialog = function(editorUi, cell)
 				y = 1;
 			}
 
-			return {x: x, y: y, dx: parseInt(dx), dy: parseInt(dy)};
+			return {x: x, y: y, perimeter: false, dx: parseInt(dx), dy: parseInt(dy)};
 		};
 
 		function fillCPointProp(evt)
@@ -19461,23 +19481,43 @@ var ConnectionPointsDialog = function(editorUi, cell)
 				constraints.push(getConstraintFromCPoint(cp));
 			}
 
-			//Find and remove identical points
-			constraints.sort(function(a, b) 
+			// Returns the location of a point on the shape in the editor
+			function isSameLocation(a, b)
 			{
-				return (a.x != b.x) ? a.x - b.x : ((a.y != b.y) ? a.y - b.y : 
-						((a.dx != b.dx) ? a.dx - b.dx : a.dy - b.dy)); //Sort based on x then y, dx and dy
+				var p1 = editingGraph.getConnectionPoint(state, new mxConnectionConstraint(
+					new mxPoint(a.x, a.y), a.perimeter, null, a.dx, a.dy));
+				var p2 = editingGraph.getConnectionPoint(state, new mxConnectionConstraint(
+					new mxPoint(b.x, b.y), b.perimeter, null, b.dx, b.dy));
+
+				return p1.x == p2.x && p1.y == p2.y;
+			};
+
+			// Sorts by x, y, dx, dy and perimeter so identical points are
+			// adjacent with the perimeter point first
+			constraints.sort(function(a, b)
+			{
+				return (a.x != b.x) ? a.x - b.x : ((a.y != b.y) ? a.y - b.y :
+					((a.dx != b.dx) ? a.dx - b.dx : ((a.dy != b.dy) ? a.dy - b.dy :
+					(b.perimeter ? 1 : 0) - (a.perimeter ? 1 : 0))));
 			});
 
 			for (var i = 0; i < constraints.length; i++)
 			{
-				if (i > 0 && constraints[i].x == constraints[i - 1].x && constraints[i].y == constraints[i - 1].y 
-						  && constraints[i].dx == constraints[i - 1].dx && constraints[i].dy == constraints[i - 1].dy)
+				var c = constraints[i];
+
+				// Skips identical points - equal coordinates with a different
+				// perimeter flag are only identical where the outline is the
+				// bounding box, so the point that follows the outline is kept
+				if (i > 0 && c.x == constraints[i - 1].x && c.y == constraints[i - 1].y &&
+					c.dx == constraints[i - 1].dx && c.dy == constraints[i - 1].dy &&
+					(c.perimeter == constraints[i - 1].perimeter ||
+					isSameLocation(c, constraints[i - 1])))
 				{
-					continue; //Skip this identical point
+					continue;
 				}
 
-				points.push('[' + constraints[i].x + ',' + constraints[i].y + ',0,' + 
-					constraints[i].dx + ',' + constraints[i].dy + ']');
+				points.push('[' + c.x + ',' + c.y + ',' + ((c.perimeter) ? '1' : '0') +
+					',' + c.dx + ',' + c.dy + ']');
 			}
 
 			var editorGraph = editorUi.editor.graph;

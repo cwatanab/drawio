@@ -1,3 +1,35 @@
+08-SEP-2026: 31.4.5
+
+- Fixes AWS4 arrow templates and stale palette ids
+- Updates AWS shapes to the Q3-2026 icon package and adds an AWS (retired) library
+- Updates stable channel to 31.4.3
+- Updates the vendored drawio-plantuml bundle to commit 0f34c03
+- Shows the PlantUML converter's parse warnings after a successful insert, preview or edit
+- Ignores the whole .claude directory rather than two of its files
+- Updates commons-fileupload, commons-io and commons-lang3, sets upload limits
+- Removed unused server-side emf functionality
+- Moves retired AWS icons into the AWS (retired) library and drops the AR & VR and Robotics palettes
+- Aligns hairline strokes with the crisp offset in image export [jgraph/drawio-desktop#2506]
+- Forces a page break after each page in the print preview so that one page div always maps to one printed sheet
+- Sizes the print preview pages to the page area of the sheet in Safari, which ignores the size descriptor of @page rules
+- Aligns the page size of the PDF export with the print preview by applying the page scale to a copy of the page format without rounding and cropping to the same size [jgraph/drawio-desktop#1739]
+- Waits for the stylesheets, images and fonts of the print preview to load before printing instead of a fixed 500 ms delay
+- Ignore migrated Data Center drafts in the Confluence editor and update drafts in the page IDs import [DID-19815]
+- Prints the pixel column and row on the page boundary on both adjacent pages in Chrome by sizing the viewBox of the print preview pages one pixel larger than the clip in all browsers
+- Updates DOMPurify from 3.4.13 to 3.4.15
+- Remove stale drafts instead of rewriting them in the page IDs import [DID-19815]
+- Keeps cells inserted via the hover arrows in the container of the source when nothing is hit at the end point [jgraph/drawio#3693]
+- Excludes HTML text from the measured SVG bounds of hand-drawn shapes
+- Never extends or contracts transparentBounds parents from their children
+- Load the diagram file instead of a draft that is at least 15 seconds older [DID-19815]
+- Only re-save a draft in the page IDs import when its links changed [DID-19815]
+- Adds viewbox option and action to the embed protocol and applies the viewbox URL parameter in embed mode [jgraph/drawio#4763]
+- Fixes the path of the embed protocol docs in drawusaurus referenced from CLAUDE.md
+- Stops cursor-key moves and resizes scrolling the viewport [jgraph/drawio-desktop#2525]
+- Applies review fixes to the AWS Q3-2026 icon update [jgraph/drawio-dev#668]
+- Keeps the perimeter flag of connection points on apply in the connection points dialog [jgraph/drawio#4821]
+- Updates the vendored drawio-plantuml bundle to commit f6f9522
+
 06-SEP-2026: 31.4.4
 
 - Adds the Atlassian 2025 shape set core: glyph stencils and tile wrapper

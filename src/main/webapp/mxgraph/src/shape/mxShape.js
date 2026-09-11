@@ -1494,7 +1494,11 @@ mxShape.prototype.isRoundable = function()
 /**
  * Function: getSvgBoundingBox
  *
- * Returns the SVG bounding box.
+ * Returns the SVG bounding box of the painted geometry. HTML text painted
+ * by the shape (see <mxSvgCanvas2D.text>) is excluded from the measurement
+ * as its foreignObject is sized to the canvas (see
+ * <mxSvgCanvas2D.updateTextNodes>), so getBBox would return a box from the
+ * SVG origin to the shape that grows with the canvas on every validation.
  */
 mxShape.prototype.getSvgBoundingBox = function()
 {
@@ -1502,14 +1506,16 @@ mxShape.prototype.getSvgBoundingBox = function()
 
 	if (this.node != null && this.node.ownerSVGElement != null)
 	{
+		var removed = this.removeForeignObjectNodes();
+
 		try
 		{
 			var b = this.node.getBBox();
-	
+
 			if (b.width > 0 && b.height > 0)
 			{
 				result = new mxRectangle(b.x, b.y, b.width, b.height);
-				
+
 				// Adds stroke width
 				if (this.stroke != null)
 				{
@@ -1521,6 +1527,51 @@ mxShape.prototype.getSvgBoundingBox = function()
 		{
 			// fallback to shape bbox
 		}
+
+		// Restores the nodes in reverse order as the next sibling
+		// of a removed node may be a removed node itself
+		for (var i = removed.length - 1; i >= 0; i--)
+		{
+			this.node.insertBefore(removed[i].node, removed[i].next);
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Function: removeForeignObjectNodes
+ *
+ * Removes the child nodes of <node> that contain a foreignObject and returns
+ * them in document order with the next sibling they were removed from so
+ * they can be restored at their original positions.
+ */
+mxShape.prototype.removeForeignObjectNodes = function()
+{
+	var result = [];
+	var fos = this.node.getElementsByTagNameNS(mxConstants.NS_SVG, 'foreignObject');
+	var nodes = [];
+
+	// Copies the live collection into the child nodes of node before removal
+	for (var i = 0; i < fos.length; i++)
+	{
+		var child = fos[i];
+
+		while (child.parentNode != null && child.parentNode != this.node)
+		{
+			child = child.parentNode;
+		}
+
+		if (child.parentNode == this.node && mxUtils.indexOf(nodes, child) < 0)
+		{
+			nodes.push(child);
+		}
+	}
+
+	for (var i = 0; i < nodes.length; i++)
+	{
+		result.push({node: nodes[i], next: nodes[i].nextSibling});
+		this.node.removeChild(nodes[i]);
 	}
 
 	return result;

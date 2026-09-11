@@ -86,10 +86,10 @@
 							  'Database', 'Desktop App Streaming', 'Developer Tools', 'Game Development', 'Internet of Things', 'IoT Things', 'IoT Resources', 'Machine Learning', 'Management Tools',
 							  'Media Services', 'Migration', 'Mobile Services', 'Network Content Delivery', 'Security Identity Compliance', 'Storage'];
 	
-	Sidebar.prototype.aws4 = ['Arrows', 'General Resources', 'Illustrations', 'Groups', 'Analytics', 'Application Integration', 'AR VR', 'Artificial Intelligence', 'Cloud Financial Management', 'Blockchain', 
+	Sidebar.prototype.aws4 = ['Arrows', 'General Resources', 'Illustrations', 'Groups', 'Analytics', 'Application Integration', 'Artificial Intelligence', 'Cloud Financial Management', 'Blockchain',
 							  'Business Applications', 'Compute', 'Contact Center', 'Containers', 'Customer Enablement', 'Customer Engagement',
-							  'Database', 'Developer Tools', 'End User Computing', 'Front End Web Mobile', 'Games', 'Internet of Things', 'IoT Things', 'IoT Resources', 'Management Governance',
-							  'Media Services', 'Migration Modernization', 'Network Content Delivery', 'Quantum Technologies', 'Robotics', 'Satellite', 'Serverless', 'Security Identity Compliance', 'Storage'];
+							  'Database', 'Developer Tools', 'End User Computing', 'Front End Web Mobile', 'Games', 'Internet of Things', 'Management Governance',
+							  'Media Services', 'Migration Modernization', 'Network Content Delivery', 'Quantum Technologies', 'Satellite', 'Serverless', 'Security Identity Compliance', 'Storage'];
 
 	Sidebar.prototype.office = ['Clouds', 'Communications', 'Concepts', 'Databases', 'Devices', 'Security', 'Servers', 'Services', 'Sites', 'Users'];
 	Sidebar.prototype.openstack = ['Blue', 'Grey', 'Green', 'Red'];
@@ -165,6 +165,7 @@
            	                           {id: 'aws4b', prefix: 'aws4b', libs: Sidebar.prototype.aws4b},
            	                           {id: 'sap', prefix: 'sap', libs: Sidebar.prototype.sap},
            	                           {id: 'aws4', prefix: 'aws4', libs: Sidebar.prototype.aws4},
+           	                           {id: 'aws4r', libs: ['aws4r']},
            	                           {id: 'pid', prefix: 'pid', libs: Sidebar.prototype.pids},
            	                           {id: 'cisco', prefix: 'cisco', libs: Sidebar.prototype.cisco},
            	                           {id: 'cisco_safe', prefix: 'cisco_safe', libs: Sidebar.prototype.cisco_safe},
@@ -528,6 +529,7 @@
 								{title: 'AWS17', id: 'aws3', image: IMAGE_PATH + '/sidebar-aws3.png'},
 								{title: 'AWS18', id: 'aws4b', image: IMAGE_PATH + '/sidebar-aws4b.png'},
 								{title: 'AWS ' + year, id: 'aws4', image: IMAGE_PATH + '/sidebar-aws4.png'},
+								{title: 'AWS (retired)', id: 'aws4r', image: IMAGE_PATH + '/sidebar-aws4r.png'},
 								// TODO: Add isometric containers  		                          
 								{title: mxResources.get('aws3d'), id: 'aws3d', image: IMAGE_PATH + '/sidebar-aws3d.png'},
 								{title: mxResources.get('azure'), id: 'azure2', image: IMAGE_PATH + '/sidebar-azure.png'},
@@ -1603,6 +1605,7 @@
 		this.addAWS3Palette();
 		this.addAWS4bPalette();
 		this.addAWS4Palette();
+		this.addAWS4RetiredPalette();
 		this.addAWS3DPalette();
 		this.addAzurePalette();
 		this.addAzure2Palette();
@@ -1948,7 +1951,7 @@
 	 * versions where only the latest library of a family should be
 	 * suggested (all remain available via More Shapes and search).
 	 */
-	Sidebar.prototype.libraryChipExcluded = ['uml', 'aws3', 'aws4b', 'cisco',
+	Sidebar.prototype.libraryChipExcluded = ['uml', 'aws3', 'aws4b', 'aws4r', 'cisco',
 		'network', 'citrix', 'gcp2', 'archimate'];
 
 	/**
@@ -1960,7 +1963,7 @@
 	 * shape that matches the search terms better still ranks first. The
 	 * default UML library is not demoted as it is enabled by default.
 	 */
-	Sidebar.prototype.librarySearchWeights = {aws3: -2, aws4b: -1,
+	Sidebar.prototype.librarySearchWeights = {aws3: -2, aws4b: -1, aws4r: -1,
 		azure: -1, cisco: -1, citrix: -1, gcp2: -1, network: -1,
 		veeam: -1, archimate: -1};
 

@@ -3864,20 +3864,13 @@ App.prototype.start = function()
 							{
 								this.loadFile(id, null, null, mxUtils.bind(this, function()
 								{
-									var temp = decodeURIComponent(urlParams['viewbox'] || '');
-									
-									if (temp != '')
+									// Same object as the embed protocol's viewbox
+									// option, see EditorUi.parseViewBox
+									var bounds = EditorUi.getViewBoxParam();
+
+									if (bounds != null)
 									{
-										try
-										{
-											var bounds = JSON.parse(temp);
-											this.editor.graph.fitWindow(bounds, bounds.border);
-										}
-										catch (e)
-										{
-											// Ignore invalid viewport
-											console.error(e);
-										}
+										this.applyViewBox(bounds);
 									}
 								}));
 							}

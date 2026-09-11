@@ -2582,7 +2582,14 @@ PrintDialog.prototype.create = function(editorUi)
 };
 
 /**
- * Constructs a new print dialog.
+ * Maximum time in milliseconds to wait for the resources of the print
+ * preview to load before printing. Default is 10000.
+ */
+PrintDialog.printTimeout = 10000;
+
+/**
+ * Prints the given preview after its document, fonts and images have
+ * finished loading (see <PrintDialog.waitForResources>).
  */
 PrintDialog.printPreview = function(preview)
 {
@@ -2590,21 +2597,127 @@ PrintDialog.printPreview = function(preview)
 	{
 		if (preview.wnd != null)
 		{
+			var wnd = preview.wnd;
+
 			var printFn = function()
 			{
-				preview.wnd.focus();
-				preview.wnd.print();
-				preview.wnd.close();
+				wnd.focus();
+				wnd.print();
+				wnd.close();
 			};
-			
-			// Workaround for rendering SVG output and
-			// make window available for printing
-			window.setTimeout(printFn, 500);
+
+			PrintDialog.waitForResources(wnd, printFn, PrintDialog.printTimeout);
 		}
 	}
 	catch (e)
 	{
 		// ignores possible Access Denied
+	}
+};
+
+/**
+ * Invokes the given function when the document in the given window and its
+ * stylesheets, images and fonts have finished loading, or after the given
+ * timeout in milliseconds, whichever comes first. The images are awaited
+ * explicitly as in the export pipeline (see export.js) because a document
+ * created via document.write reports a complete ready state before its
+ * images have loaded, and fonts are only fetched once they are used, so
+ * document.fonts.ready is awaited after the stylesheets have loaded and
+ * the font faces are known.
+ */
+PrintDialog.waitForResources = function(wnd, fn, timeout)
+{
+	var done = false;
+	var timer = null;
+	var pending = 1;
+	var cache = {};
+
+	var finish = function()
+	{
+		if (!done)
+		{
+			done = true;
+			window.clearTimeout(timer);
+			fn();
+		}
+	};
+
+	var decrement = function()
+	{
+		if (--pending == 0)
+		{
+			finish();
+		}
+	};
+
+	// Loads the given URL into a new image to wait for the
+	// resource, which is served from the cache when loaded
+	var waitForImage = function(src)
+	{
+		if (src != null && src.length > 0 && cache[src] == null)
+		{
+			pending++;
+			cache[src] = new Image();
+			cache[src].onload = decrement;
+			cache[src].onerror = decrement;
+			cache[src].src = src;
+		}
+	};
+
+	var waitForImagesAndFonts = function()
+	{
+		try
+		{
+			var doc = wnd.document;
+			var imgs = doc.getElementsByTagName('img');
+
+			for (var i = 0; i < imgs.length; i++)
+			{
+				if (!imgs[i].complete)
+				{
+					waitForImage(imgs[i].getAttribute('src'));
+				}
+			}
+
+			var svgImgs = doc.getElementsByTagName('image');
+
+			for (var i = 0; i < svgImgs.length; i++)
+			{
+				waitForImage(svgImgs[i].getAttribute('href') ||
+					svgImgs[i].getAttribute('xlink:href'));
+			}
+
+			if (doc.fonts != null && doc.fonts.ready != null)
+			{
+				pending++;
+				doc.fonts.ready.then(decrement, decrement);
+			}
+		}
+		catch (e)
+		{
+			// ignores errors and prints when the
+			// remaining resources have loaded
+		}
+
+		decrement();
+	};
+
+	try
+	{
+		timer = window.setTimeout(finish, timeout);
+
+		if (wnd.document.readyState == 'complete')
+		{
+			waitForImagesAndFonts();
+		}
+		else
+		{
+			mxEvent.addListener(wnd, 'load', waitForImagesAndFonts);
+		}
+	}
+	catch (e)
+	{
+		finish();
 	}
 };
 

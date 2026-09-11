@@ -225,6 +225,13 @@ mxPrintPreview.prototype.defaultCss =
 	'  body {\n' +
 	'    margin: 0px;\n' +
 	'  }\n' +
+	'  body > div {\n' +
+	'    break-after: page;\n' +
+	'    break-inside: avoid;\n' +
+	'  }\n' +
+	'  body > div:last-of-type {\n' +
+	'    break-after: auto;\n' +
+	'  }\n' +
 	'  * {\n' +
 	'    -webkit-print-color-adjust: exact;\n' +
 	'  }\n' +
@@ -412,23 +419,65 @@ mxPrintPreview.prototype.appendGraph = function(graph, scale, x0, y0, forcePageB
 };
 
 /**
+ * Function: isPageAreaSizeEnabled
+ *
+ * Returns true if the page divs should be sized to the page area of the
+ * printed sheet instead of the page format in the print output. This
+ * returns true for Safari, which ignores the size descriptor in @page
+ * rules, so that the sheet is the paper selected in the print dialog and
+ * pages sized in inches overflow or underflow it. Sizing the page divs to
+ * the page area maps each page to one sheet, with the content scaled
+ * uniformly to fit the sheet.
+ */
+mxPrintPreview.prototype.isPageAreaSizeEnabled = function()
+{
+	return mxClient.IS_SF;
+};
+
+/**
+ * Function: getPageAreaCss
+ *
+ * Returns the CSS that is required once for sizing the page divs to the
+ * page area of the printed sheet, or an empty string if
+ * <isPageAreaSizeEnabled> returns false. All pages use the unnamed page
+ * with no margin so that html, body and the page divs share the same
+ * page area (the page margin is the padding of the page divs).
+ */
+mxPrintPreview.prototype.getPageAreaCss = function()
+{
+	return (this.isPageAreaSizeEnabled()) ?
+		'@page {\n' +
+		'  margin: 0;\n' +
+		'}\n' +
+		'@media print {\n' +
+		'  html, body {\n' +
+		'    height: 100%;\n' +
+		'  }\n' +
+		'}\n' : '';
+};
+
+/**
  * Function: getPageClassCss
- * 
+ *
  * Gets the CSS for the given page CSS class and page format.
  */
 mxPrintPreview.prototype.getPageClassCss = function(pageClass, pageFormat)
 {
 	var pm = this.pageMargin;
 	var ppi = this.pixelsPerInch;
+	var pageArea = this.isPageAreaSizeEnabled();
 	var size = ((pageFormat.width / ppi)).toFixed(2) + 'in ' +
 		((pageFormat.height / ppi)).toFixed(2) + 'in';
 
-	var css = '@page ' + pageClass + ' {\n' +
+	// Named page with the page format as the sheet size, not used if the
+	// page divs are sized to the page area of the sheet (see getPageAreaCss)
+	var css = ((!pageArea) ?
+		'@page ' + pageClass + ' {\n' +
 		'  margin: 0;\n' +
 		'  size: ' + mxUtils.htmlEntities(size) + ';\n' +
-		'}\n' +
+		'}\n' : '') +
 		'.' + pageClass + ' {\n' +
-		'  page: ' + pageClass + ';\n' +
+		((!pageArea) ? '  page: ' + pageClass + ';\n' : '') +
 		((mxClient.IS_SF) ?
 			'  padding: ' + mxUtils.htmlEntities((pm / ppi).toFixed(2)) + 'in;\n' : '') +
 		'  width: ' + mxUtils.htmlEntities(((pageFormat.width /
@@ -436,12 +485,25 @@ mxPrintPreview.prototype.getPageClassCss = function(pageClass, pageFormat)
 		'  height: ' + mxUtils.htmlEntities(((pageFormat.height /
 			ppi)).toFixed(2)) + 'in;\n' +
 		'}\n';
-	
+
 	if (!mxClient.IS_SF)
 	{
 		css += '.' + pageClass + ' > svg {\n' +
 		'  margin: ' + mxUtils.htmlEntities((pm / ppi).toFixed(2)) + 'in;\n' +
 		'}\n';
+	}
+
+	// Sizes the page div to the page area of the sheet in the print output
+	// (the sizes in inches above are used for the preview on screen)
+	if (pageArea)
+	{
+		css += '@media print {\n' +
+			'  .' + pageClass + ' {\n' +
+			'    box-sizing: border-box;\n' +
+			'    width: 100%;\n' +
+			'    height: 100%;\n' +
+			'  }\n' +
+			'}\n';
 	}
 
 	return css;
@@ -483,7 +545,7 @@ mxPrintPreview.prototype.open = function(css, targetWindow, forcePageBreaks, kee
 			if (this.pendingCss == null)
 			{
 				this.pageFormatClass = {};
-				this.pendingCss = '';
+				this.pendingCss = this.getPageAreaCss();
 			}
 
 			pageClass = mxUtils.htmlEntities('gePageFormat-' +
@@ -1038,10 +1100,16 @@ mxPrintPreview.prototype.addGraphFragment = function(dx, dy, scale, pageNumber, 
 				tmp.style.maxHeight = '100%';
 				tmp.style.overflow = (mxClient.IS_SF) ? 'hidden' : 'clip';
 				tmp.style.overflowClipMargin = this.overflowClipMargin;
+
+				// The clip is one pixel larger than the page format so that the
+				// pixel column and row on the page boundary, where the strokes
+				// of shapes ending on the boundary are drawn, is printed on both
+				// adjacent pages. The viewBox adds one more pixel so that the
+				// boundary pixel stays inside the sheet, whose printable area
+				// may be slightly smaller than the page div (Chrome rounds the
+				// sheet size), instead of being clipped on the first page.
 				tmp.setAttribute('viewBox', '0 0 ' +
-					((mxClient.IS_SF) ?
-					((clip.width + 1) + ' ' + (clip.height + 1)) :	
-					((clip.width - 1) + ' ' + (clip.height - 1))));
+					(clip.width + 1) + ' ' + (clip.height + 1));
 
 				this.addGrid(tmp, clip);
 				

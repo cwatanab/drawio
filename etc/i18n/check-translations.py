@@ -8,15 +8,25 @@ script reports, for each dia_<lang>.txt in src/main/webapp/resources:
   - extra keys (present in the language file, absent from dia.txt)
   - duplicate keys and malformed (no '=') lines
 
-Exits non-zero if any language file is missing a key, so it can act as a
-CI guard. Fixes are not applied automatically: new values need actual
-translations (the sortPages backfill in July 2026 was done by fanning the
-missing entries out to per-language-family translator subagents).
+Exits non-zero if any language file is missing a key, and prints a final
+MISSING-KEYS digest line naming the distinct keys in dia.txt order.
+.github/workflows/validate-preprod.yml runs this on every preprod push and
+fails the run on that exit code; since an English key legitimately lands
+before its translations, [i18n-skip] in a pushed commit message downgrades
+that to a warning.
+
+Fixes are not applied automatically: new values need actual translations
+(the sortPages backfill in July 2026 and the 31.4.5 backfill in September
+2026 were both done by fanning the missing entries out to
+per-language-family translator subagents).
 
 Conventions for adding a missing key manually:
   - insert the line at the same position relative to its dia.txt
     neighbours (the language files share a common ordering)
-  - ar/fa/he wrap translated values in U+202B ... U+202C directional marks
+  - ar/fa/he wrap translated values in U+202B ... U+202C directional
+    marks (93-94% of the values that contain RTL script). The unwrapped
+    ones are the values still left as untranslated English, so compare
+    against a genuinely translated neighbour, not just any neighbour
   - dia_i18n.txt is a pseudo-language whose value is the key itself
 """
 import glob
@@ -55,6 +65,7 @@ def main():
           f"{len(base_dups)} duplicates, {len(base_bad)} malformed lines")
 
     total_missing = 0
+    missing_keys = set()
     for path in sorted(glob.glob(os.path.join(RES, "dia_*.txt"))):
         name = os.path.basename(path)
         entries, dups, bad = parse(path)
@@ -62,6 +73,7 @@ def main():
         missing = [k for k in base_keys if k not in keys]
         extra = sorted(k for k in keys if k not in base_set)
         total_missing += len(missing)
+        missing_keys.update(missing)
 
         flags = []
         if missing:
@@ -76,7 +88,12 @@ def main():
         print(f"{name}: {len(entries)} entries, {status}")
 
     if total_missing:
+        # The digest line is what CI quotes in its annotation, so keep the
+        # keys in dia.txt order: that is also the order a backfill inserts
+        # them in.
+        digest = [k for k in base_keys if k in missing_keys]
         print(f"\nFAIL: {total_missing} missing entries across language files")
+        print(f"MISSING-KEYS ({len(digest)}): {', '.join(digest)}")
         return 1
     print("\nOK: no missing entries")
     return 0

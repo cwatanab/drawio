@@ -1644,6 +1644,9 @@ function render(data)
 			(data.format == 'png' || data.format == 'jpg' ||
 			data.format == 'jpeg' || data.format == 'svg');
 
+		// Page format with the page scale applied for the print output below
+		var printPageFormat = null;
+
 		// Handles PDF output where the output should match the page format if the page is visible
 		if (data.print || data.format == 'pdf' || imagePageVisible)
 		{
@@ -1669,13 +1672,16 @@ function render(data)
 			// (the pages are rendered larger and shrunk to the paper size by the
 			// print scale factor), while image output uses the page size as shown
 			// in the editor, which getPageSize below derives from the unchanged
-			// page format
+			// page format. The page scale is applied to a copy of the page format
+			// without rounding, as in EditorUi.print, so that the printed page
+			// grid stays aligned with the page breaks on the canvas for fractional
+			// page formats and getPageSize does not apply the page scale twice
 			if (!imagePageVisible)
 			{
-				var pf = graph.pageFormat;
+				var pf = mxRectangle.fromRectangle(graph.pageFormat);
 				var temp = data.reqScale;
-				pf.width = Math.ceil(pf.width * graph.pageScale);
-				pf.height = Math.ceil(pf.height * graph.pageScale);
+				pf.width = pf.width * graph.pageScale;
+				pf.height = pf.height * graph.pageScale;
 				var scale = 1;
 
 				if (data.fit == '1' && data.sheetsAcross != null && data.sheetsDown != null)
@@ -1699,6 +1705,7 @@ function render(data)
 
 				// Applies print scale
 				data.scale = scale * printScale;
+				printPageFormat = pf;
 			}
 
 			graph.getPageSize = function()
@@ -1865,7 +1872,8 @@ function render(data)
 		// Converts the graph to a vertical sequence of pages for PDF export
 		if (graph.pdfPageVisible)
 		{
-			var pf = graph.pageFormat || mxConstants.PAGE_FORMAT_A4_PORTRAIT;
+			var pf = (printPageFormat != null) ? printPageFormat : mxRectangle.fromRectangle(
+				graph.pageFormat || mxConstants.PAGE_FORMAT_A4_PORTRAIT);
 			var scale = (data.print || data.format == 'pdf') ? data.scale : 1 / graph.pageScale;
 			var autoOrigin = ((data.print || data.format == 'pdf') && data.fit == '1') ||
 				data.crop == '1' || xmlDoc.documentElement.getAttribute('page') != '1';
@@ -1877,8 +1885,8 @@ function render(data)
 	
 			if (data.crop == '1')
 			{
-				pf.width = (gb.width + 1.5) * scale;
-				pf.height = (gb.height + 1.5) * scale;
+				pf.width = (gb.width + 1) * scale;
+				pf.height = (gb.height + 1) * scale;
 			}
 
 			// Starts at first visible page

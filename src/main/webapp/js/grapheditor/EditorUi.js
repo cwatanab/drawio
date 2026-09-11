@@ -7508,55 +7508,6 @@ EditorUi.prototype.createKeyHandler = function(editor)
 		graphFireMouseEvent.apply(this, arguments);
 	};
 
-	// Helper function to center the given cells in the viewport if they have
-	// moved completely out of view, so that a selection that is moved or
-	// resized with the cursor keys can be followed. The viewport must not
-	// move while any part of the selection is visible, eg. when a partially
-	// visible shape is aligned with the cursor keys while zoomed in
-	function scrollCellsToVisible(cells)
-	{
-		var handler = graph.graphHandler;
-		var c = graph.container;
-		var b = null;
-
-		if (handler != null && handler.first != null)
-		{
-			if (handler.bounds != null)
-			{
-				// Cells are not moved until the change is committed so the
-				// pending preview offset is added to the start bounds
-				b = mxRectangle.fromRectangle(handler.bounds);
-				b.x += handler.currentDx;
-				b.y += handler.currentDy;
-			}
-		}
-		else
-		{
-			b = graph.view.getBounds(cells);
-		}
-
-		if (b != null && c != null &&
-			(b.x + b.width < c.scrollLeft || b.y + b.height < c.scrollTop ||
-			b.x > c.scrollLeft + c.clientWidth ||
-			b.y > c.scrollTop + c.clientHeight))
-		{
-			var t = graph.view.translate;
-			var tr = new mxPoint(t.x, t.y);
-
-			if (graph.scrollRectToVisible(new mxRectangle(
-				b.getCenterX() - t.x - c.clientWidth / 2,
-				b.getCenterY() - t.y - c.clientHeight / 2,
-				c.clientWidth, c.clientHeight)))
-			{
-				// Triggers an update via the view's event source
-				var tr2 = new mxPoint(t.x, t.y);
-				graph.view.translate.x = tr.x;
-				graph.view.translate.y = tr.y;
-				graph.view.setTranslate(tr2.x, tr2.y);
-			}
-		}
-	};
-
 	// Helper function to move cells with the cursor keys
 	function nudge(keyCode, stepSize, resize)
 	{
@@ -7688,8 +7639,6 @@ EditorUi.prototype.createKeyHandler = function(editor)
 						}
 					}
 				}
-
-				scrollCellsToVisible(cells);
 			}
 		}
 	};

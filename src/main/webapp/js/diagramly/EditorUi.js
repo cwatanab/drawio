@@ -13284,6 +13284,13 @@
 	/**
 	 * Parses the given PlantUML source with the native converter and returns
 	 * diagram XML via `success`. Loads the converter bundle on demand.
+	 *
+	 * `success` is called as (xml, warnings), where warnings is the converter's
+	 * list of user-facing strings for input it could not use (a dropped line, an
+	 * ignored directive). They are soft: the XML is complete and usable, so
+	 * callers that are user-initiated pass them to showPlantUmlWarnings, and
+	 * background callers ignore them. Always an array, empty for bundles
+	 * predating the warnings channel.
 	 */
 	EditorUi.prototype.parsePlantUmlDiagram = function(data, config, success, error)
 	{
@@ -13305,7 +13312,18 @@
 			{
 				try
 				{
-					success(mxPlantUmlToDrawio.parseText(data, config));
+					var xml = mxPlantUmlToDrawio.parseText(data, config);
+
+					// Soft diagnostics for lines the converter dropped or
+					// directives it ignored. Read directly after the parse so a
+					// later parse cannot overwrite them, and handed to the
+					// caller rather than shown here: the silent refresh paths
+					// (eg. refreshMermaidImage) must not raise a notice.
+					// Bundles older than the warnings channel have no
+					// lastWarnings, which yields an empty list.
+					success(xml, (typeof mxPlantUmlToDrawio.lastWarnings !== 'undefined' &&
+						mxPlantUmlToDrawio.lastWarnings != null) ?
+						mxPlantUmlToDrawio.lastWarnings.slice() : []);
 				}
 				catch (e)
 				{
@@ -13329,10 +13347,47 @@
 	 */
 	EditorUi.prototype.parsePlantUmlImage = function(text, success, error)
 	{
-		this.parsePlantUmlDiagram(text, null, mxUtils.bind(this, function(xml)
+		this.parsePlantUmlDiagram(text, null, mxUtils.bind(this, function(xml, warnings)
 		{
-			success(this.createMermaidImageXml(text, null, xml, null, null, 'plantUmlData'));
+			// The warnings are about the source, not the representation, so
+			// they pass through to the caller unchanged
+			success(this.createMermaidImageXml(text, null, xml, null, null,
+				'plantUmlData'), warnings);
 		}), error);
+	};
+
+	/**
+	 * Maximum number of PlantUML parse warnings listed by showPlantUmlWarnings
+	 * before the rest are summarized.
+	 */
+	EditorUi.prototype.maxPlantUmlWarnings = 10;
+
+	/**
+	 * Shows the given PlantUML parse warnings (see parsePlantUmlDiagram) in the
+	 * non-modal, auto-fading alert. The parse succeeded and the diagram is
+	 * already inserted or previewed, so this only informs: it must never block
+	 * or undo that, which is why it is not routed through handleError/showError.
+	 * No-op for an empty list, and where showAlert is unavailable.
+	 */
+	EditorUi.prototype.showPlantUmlWarnings = function(warnings)
+	{
+		if (warnings != null && warnings.length > 0 && this.showAlert != null)
+		{
+			var shown = warnings.slice(0, this.maxPlantUmlWarnings);
+
+			if (warnings.length > shown.length)
+			{
+				shown.push(mxResources.get('andNMore',
+					[warnings.length - shown.length]));
+			}
+
+			// showAlert writes its argument as HTML and the warnings quote the
+			// user's own source (the dropped line), so they are escaped here.
+			// The alert is styled white-space:pre-wrap, so the newlines break
+			// the lines without any markup of our own.
+			this.showAlert(mxUtils.htmlEntities(mxResources.get('plantUmlWarnings') +
+				'\n' + shown.join('\n')));
+		}
 	};
 
 	/**
@@ -15330,7 +15385,7 @@
 	    		// insert paths
 	    		var config = isGroup ? obj.config : null;
 
-	    		ui.parsePlantUmlDiagram(text, config, function(xml)
+	    		ui.parsePlantUmlDiagram(text, config, function(xml, warnings)
 	    		{
 	    			ui.spinner.stop();
 
@@ -15388,6 +15443,11 @@
 	    				{
 	    					graph.getModel().endUpdate();
 	    				}
+
+	    				// Reports what the converter could not use, once the
+	    				// apply succeeded: the cell keeps the new content. A
+	    				// failed apply reports its own error instead
+	    				ui.showPlantUmlWarnings(warnings);
 	    			}
 	    			catch (e)
 	    			{
@@ -15402,10 +15462,14 @@
 				if (ui.spinner.spin(document.body, mxResources.get('loading')))
 				{
 					ui.parsePlantUmlDiagram(text, isGroup ? obj.config : null,
-						function(xml)
+						function(xml, warnings)
 					{
 						ui.spinner.stop();
 						ui.showPreviewTooltip(xml, evt);
+
+						// Reports what the converter could not use, after the
+						// preview is up: the tooltip stays open
+						ui.showPlantUmlWarnings(warnings);
 					}, function(e)
 					{
 						ui.spinner.stop();
@@ -22745,6 +22809,95 @@
 	};
 
 	/**
+	 * Returns a validated copy of the given viewbox, or null. A viewbox is
+	 * {x, y, width, height} in graph (model) coordinates plus an optional
+	 * border in screen pixels; a JSON string is accepted too. This is the
+	 * object used by the viewbox URL parameter, the embed protocol's load
+	 * option and its viewbox action, so all three take the same value.
+	 * Rejects anything that would feed NaN or a zero size into fitWindow.
+	 */
+	EditorUi.parseViewBox = function(value)
+	{
+		try
+		{
+			if (typeof value === 'string')
+			{
+				value = JSON.parse(value);
+			}
+
+			if (value != null && typeof value === 'object')
+			{
+				var x = parseFloat(value.x);
+				var y = parseFloat(value.y);
+				var w = parseFloat(value.width);
+				var h = parseFloat(value.height);
+				var b = (value.border != null && value.border !== '') ?
+					parseFloat(value.border) : null;
+
+				if (isFinite(x) && isFinite(y) && isFinite(w) && isFinite(h) &&
+					w > 0 && h > 0 && (b == null || (isFinite(b) && b >= 0)))
+				{
+					return {x: x, y: y, width: w, height: h, border: b};
+				}
+			}
+		}
+		catch (e)
+		{
+			// ignore invalid JSON
+		}
+
+		return null;
+	};
+
+	/**
+	 * Returns the parsed viewbox URL parameter, or null if it is absent or
+	 * invalid (see EditorUi.parseViewBox).
+	 */
+	EditorUi.getViewBoxParam = function()
+	{
+		var vb = null;
+
+		if (urlParams['viewbox'] != null)
+		{
+			try
+			{
+				vb = EditorUi.parseViewBox(decodeURIComponent(urlParams['viewbox']));
+			}
+			catch (e)
+			{
+				// malformed percent-encoding
+			}
+
+			if (vb == null)
+			{
+				console.error('Ignoring invalid viewbox URL parameter');
+			}
+		}
+
+		return vb;
+	};
+
+	/**
+	 * Shows the given viewbox (see EditorUi.parseViewBox) in the graph
+	 * container. Regular fitWindow only zooms in chromeless mode (no
+	 * scrollbars to pan), so that mode goes through fitBoundsCssTransform
+	 * like the viewbox animation step does.
+	 */
+	EditorUi.prototype.applyViewBox = function(vb)
+	{
+		var graph = this.editor.graph;
+
+		if (graph.useCssTransforms)
+		{
+			graph.fitBoundsCssTransform(vb, vb.border);
+		}
+		else
+		{
+			graph.fitWindow(vb, vb.border);
+		}
+	};
+
+	/**
 	 * Adds the buttons for embedded mode.
 	 */
 	EditorUi.prototype.createLoadMessage = function(eventName)
@@ -23640,7 +23793,15 @@
 						// Accepts a custom-layout array or any shorthand
 						// accepted by resolveLayoutList (preset names,
 						// 'libavoid'), same as the load "layout" option.
-						this.executeLayoutSpec(data.layouts);
+						// Reports completion with the common state fields so
+						// the host can follow up with a fit or viewbox action
+						// once the cells have moved.
+						this.executeLayoutSpec(data.layouts, mxUtils.bind(this, function()
+						{
+							var msg = this.createLoadMessage('layout');
+							msg.message = data;
+							parent.postMessage(JSON.stringify(msg), '*');
+						}));
 
 						return;
 					}
@@ -23892,6 +24053,24 @@
 						graph.maxFitScale = prev;
 
 						var msg = this.createLoadMessage('fit');
+						msg.message = data;
+						parent.postMessage(JSON.stringify(msg), '*');
+
+						return;
+					}
+					else if (data.action == 'viewbox')
+					{
+						// Same object as the viewbox URL parameter and the
+						// load option (see EditorUi.parseViewBox); an invalid
+						// value leaves the view unchanged but still replies
+						var vb = EditorUi.parseViewBox(data.viewbox);
+
+						if (vb != null)
+						{
+							this.applyViewBox(vb);
+						}
+
+						var msg = this.createLoadMessage('viewbox');
 						msg.message = data;
 						parent.postMessage(JSON.stringify(msg), '*');
 
@@ -24404,7 +24583,30 @@
 
 						this.embedExitPoint = null;
 
-						if (data.scale != null)
+						// viewbox: shows the given diagram region after loading
+						// (same {x, y, width, height, border} object as the
+						// viewbox URL parameter, see EditorUi.parseViewBox).
+						// Takes precedence over scale and fit and over the
+						// page's stored initial view. The URL parameter is the
+						// fallback when the message carries none of the three
+						// view options, so a host can set the initial view in
+						// the iframe URL alone (jgraph/drawio#4763).
+						var viewbox = EditorUi.parseViewBox(data.viewbox);
+
+						if (viewbox == null && data.viewbox == null &&
+							data.scale == null && data.fit == null)
+						{
+							viewbox = EditorUi.getViewBoxParam();
+						}
+
+						if (viewbox != null)
+						{
+							afterLoad = mxUtils.bind(this, function()
+							{
+								this.applyViewBox(viewbox);
+							});
+						}
+						else if (data.scale != null)
 						{
 							var customScale = data.scale;
 							var scaleBorder = (data.scaleBorder != null) ?

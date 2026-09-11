@@ -12072,6 +12072,26 @@ Graph.prototype.connectVertex = function(source, direction, length, evt, forceCl
 		}
 	}
 
+	// Uses the parent of the composite as the container if no target or
+	// other container was found at the end point so that cells inserted in
+	// the direction of the flow stay in the parent and extend it instead of
+	// falling out into the default parent. The end point is relative to the
+	// parent of the composite, which is also the cell that gets cloned.
+	// Parents are only ever extended to the right and bottom so end points
+	// above or left of the parent origin are not handled here.
+	// [jgraph/drawio#3693]
+	if (container == null && target == null && !cloneSource &&
+		pt.x >= 0 && pt.y >= 0)
+	{
+		var sourceParent = this.model.getParent(composite);
+
+		if (sourceParent != null && this.model.isVertex(sourceParent) &&
+			this.isContainer(sourceParent) && !this.isCellLocked(sourceParent))
+		{
+			container = sourceParent;
+		}
+	}
+
 	var duplicate = (!mxEvent.isShiftDown(evt) || mxEvent.isControlDown(evt)) || forceClone;
 	
 	if (duplicate && (urlParams['sketch'] != '1' || forceClone))
@@ -18277,7 +18297,11 @@ if (typeof mxVertexHandler !== 'undefined')
 		};
 		
 		/**
-		 * Overridden to add expand style.
+		 * Overridden to add expand style. A transparentBounds parent is never
+		 * extended: its stored geometry stays pinned at (0,0,0,0) and the visible
+		 * box is derived from the children, so mxGraph.extendParent (reached from
+		 * cellsAdded, cellsResized and cellsFolded) would only persist a stale
+		 * child.x + width + padding size into the file.
 		 */
 		var graphIsExtendParent = Graph.prototype.isExtendParent;
 		Graph.prototype.isExtendParent = function(cell)
@@ -18286,6 +18310,11 @@ if (typeof mxVertexHandler !== 'undefined')
 
 			if (parent != null)
 			{
+				if (this.isTransparentBounds(parent))
+				{
+					return false;
+				}
+
 				var style = this.getCurrentCellStyle(parent);
 
 				if (style['expand'] != null)
@@ -18299,7 +18328,8 @@ if (typeof mxVertexHandler !== 'undefined')
 		};
 
 		/**
-		 * Overridden to add contract style.
+		 * Overridden to add contract style. A transparentBounds parent is never
+		 * contracted, see isExtendParent.
 		 */
 		var graphIsContractParent = Graph.prototype.isContractParent;
 		Graph.prototype.isContractParent = function(cell)
@@ -18308,6 +18338,11 @@ if (typeof mxVertexHandler !== 'undefined')
 
 			if (parent != null)
 			{
+				if (this.isTransparentBounds(parent))
+				{
+					return false;
+				}
+
 				var style = this.getCurrentCellStyle(parent);
 
 				if (style['contract'] != null)
