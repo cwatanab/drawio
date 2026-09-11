@@ -337,7 +337,8 @@ App.pluginRegistry = {'4xAKTrabTpTzahoLthkwPNUn': 'plugins/explore.js',
 	'replay': 'plugins/replay.js', 'anon': 'plugins/anonymize.js',
 	'tr': 'plugins/trello.js', 'f5': 'plugins/rackF5.js',
 	'webcola': 'plugins/webcola/webcola.js', 'rnd': 'plugins/random.js',
-	'page': 'plugins/page.js', 'tags': 'plugins/tags.js'};
+	'page': 'plugins/page.js', 'tags': 'plugins/tags.js',
+	'hierarchy': 'plugins/hierarchy-viewer.js', 'quickstyler': 'plugins/quick-styler.js'};
 
 App.publicPlugin = [
 	'ex',
@@ -355,7 +356,9 @@ App.publicPlugin = [
 	'anon',
 	'webcola',
 //	'rnd', 'page',
-	'tags'
+	'tags',
+	'hierarchy',
+	'quickstyler'
 ];
 
 /**
