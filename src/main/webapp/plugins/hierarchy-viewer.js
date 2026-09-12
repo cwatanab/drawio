@@ -1543,8 +1543,8 @@ Draw.loadPlugin(function(ui)
 		var wasVis = oldWin.window.isVisible();
 		var bx = oldWin.window.getX();
 		var by = oldWin.window.getY();
-		var bw = Math.max(oldWin.window.getWidth(), 260);
-		var bh = Math.max(oldWin.window.getHeight(), 360);
+		var bw = Math.max(parseInt(oldWin.window.div.style.width, 10), 260);
+		var bh = Math.max(parseInt(oldWin.window.div.style.height, 10), 360);
 		oldWin.destroy();
 		ui.actions.layersWindow = new CustomLayersWindow(ui, bx, by, bw, bh);
 		ui.actions.layersWindow.window.addListener('show', function()
