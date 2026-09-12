@@ -16916,9 +16916,6 @@
 				this.fireEvent(new mxEventObject('themeInitialized'));
 			}
 
-			// Restore windows that were visible in the previous session
-			this.restoreVisibleWindows();
-
 			// Initial state of format panel and sidebar for kennedy
 			if (theme == 'kennedy')
 			{
@@ -17736,13 +17733,22 @@
 	EditorUi.prototype.hideWindows = function()
 	{
 		var wnd = this.getWindows();
+		var hidingWindows = this.hidingWindows;
+		this.hidingWindows = true;
 
-		for (var i = 0; i < wnd.length; i++)
+		try
 		{
-			if (wnd[i] != null)
+			for (var i = 0; i < wnd.length; i++)
 			{
-				wnd[i].window.setVisible(false);
+				if (wnd[i] != null)
+				{
+					wnd[i].window.setVisible(false);
+				}
 			}
+		}
+		finally
+		{
+			this.hidingWindows = hidingWindows;
 		}
 	};
 
@@ -17835,7 +17841,7 @@
 
 	/**
 	 * Restores windows that were visible when the page was last closed.
-	 * Called during initialization after theme setup.
+	 * Called when a diagram is ready, after startup's temporary window hiding.
 	 */
 	EditorUi.prototype.restoreVisibleWindows = function()
 	{
@@ -17860,7 +17866,7 @@
 			{
 				var action = this.actions.get(windowActions[name]);
 
-				if (action != null)
+				if (action != null && !action.isSelected())
 				{
 					action.funct();
 				}
@@ -17873,6 +17879,9 @@
 	 */
 	EditorUi.prototype.saveWindowState = function(name, wrapperWindow)
 	{
+		// Programmatic hiding while no diagram is open must not change the preference.
+		if (this.hidingWindows) return;
+
 		var wnd = wrapperWindow.window;
 
 		// When minimized, div height reflects the title bar; mxWindow stores
@@ -22613,6 +22622,10 @@
 		{
 			this.hideWindows();
 		}
+		else if (!this.editor.chromeless || this.editor.editable)
+		{
+			this.restoreVisibleWindows();
+		}
 
 		this.editor.graph.sizeDidChange();
 		this.resetScrollbars();
@@ -22769,11 +22782,14 @@
 	};
 	
 	/**
-	 * Shows the layers dialog if the graph has more than one layer.
+	 * Uses the saved visibility, or opens multi-layer diagrams when no preference exists.
 	 */
 	EditorUi.prototype.showLayersDialog = function()
 	{
-		if (this.editor.graph.getModel().getChildCount(this.editor.graph.getModel().getRoot()) > 1)
+		var state = Editor.isSettingsEnabled() ? mxSettings.getWindowState('layers') : null;
+
+		if ((state != null && state.visible != null) ? state.visible :
+			this.editor.graph.getModel().getChildCount(this.editor.graph.getModel().getRoot()) > 1)
 		{
 			if (this.actions.layersWindow == null)
 			{
