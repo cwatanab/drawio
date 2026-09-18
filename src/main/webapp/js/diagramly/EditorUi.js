@@ -17255,6 +17255,18 @@
 		textInput.setAttribute('autocorrect', 'off');
 		textInput.setAttribute('autocapitalize', 'off');
 		textInput.setAttribute('spellcheck', 'false');
+
+		// Keeps the virtual keyboard out of the way on touch devices. Chromium on
+		// Android reacts to the focus of an editable element by showing the soft
+		// keyboard and, if a hardware keyboard is attached, by asynchronously
+		// scrolling the focused element into view. This moved the diagram to the
+		// top left corner whenever Ctrl was pressed on a tablet with a physical
+		// keyboard. inputmode="none" disables both (see also installTypingShim).
+		if (this.isVirtualKeyboardDevice())
+		{
+			textInput.setAttribute('inputmode', 'none');
+		}
+
 		textInput.style.textRendering = 'optimizeSpeed';
 		textInput.style.fontFamily = 'monospace';
 		textInput.style.wordBreak = 'break-all';
@@ -17264,7 +17276,7 @@
 		textInput.style.whiteSpace = 'nowrap';
 		textInput.style.overflow = 'hidden';
 		textInput.style.display = 'block';
-		textInput.style.fontSize = '1';
+		textInput.style.fontSize = '1px';
 		textInput.style.zIndex = '-1';
 		textInput.style.resize = 'none';
 		textInput.style.outline = 'none';
@@ -17310,8 +17322,8 @@
 
 						graph.container.appendChild(textInput);
 						restoreFocus = true;
-						
-						textInput.focus();
+
+						textInput.focus({preventScroll: true});
 						document.execCommand('selectAll', false, null);
 
 						// Workaround for Safari 16 scroll after CMD key press
@@ -23128,24 +23140,65 @@
 	 * Structural childLayouts (tables, stacks/pools, racks) are never
 	 * replaced by a layout run.
 	 */
-	EditorUi.prototype.getSelectedLayoutContainer = function()
+	EditorUi.prototype.getSelectedLayoutContainers = function()
 	{
 		var graph = this.editor.graph;
-		var cell = (graph.getSelectionCount() == 1) ?
-			graph.getSelectionCell() : null;
+		var cells = graph.getSelectionCells();
+		var result = [];
 
-		if (cell != null && graph.model.isVertex(cell))
+		for (var i = 0; i < cells.length; i++)
 		{
-			var childLayout = graph.getCellStyle(cell)['childLayout'];
-
-			if (childLayout != null && childLayout != 'tableLayout' &&
-				childLayout != 'stackLayout' && childLayout != 'rack')
+			if (graph.model.isVertex(cells[i]))
 			{
-				return cell;
+				var childLayout = graph.getCellStyle(cells[i])['childLayout'];
+
+				if (childLayout != null && childLayout != 'tableLayout' &&
+					childLayout != 'stackLayout' && childLayout != 'rack')
+				{
+					result.push(cells[i]);
+				}
+				else
+				{
+					// Any other selected vertex keeps the legacy one-shot run
+					return [];
+				}
 			}
 		}
 
-		return null;
+		return result;
+	};
+
+	/**
+	 * Rewrites the childLayout of every selected layout container (see
+	 * getSelectedLayoutContainers) to the given spec in one undoable edit
+	 * via setContainerChildLayout and returns true, or returns false when
+	 * the selection holds no layout container so the caller runs its
+	 * one-shot layout instead.
+	 */
+	EditorUi.prototype.applyLayoutToSelectedContainers = function(spec)
+	{
+		var containers = this.getSelectedLayoutContainers();
+
+		if (containers.length == 0)
+		{
+			return false;
+		}
+
+		var model = this.editor.graph.model;
+		model.beginUpdate();
+		try
+		{
+			for (var i = 0; i < containers.length; i++)
+			{
+				this.setContainerChildLayout(containers[i], spec);
+			}
+		}
+		finally
+		{
+			model.endUpdate();
+		}
+
+		return true;
 	};
 
 	/**
@@ -23243,9 +23296,21 @@
 						config.resizeLayoutRoot = true;
 					}
 
-					if (entry.layout == 'elkLayered' && config.extractIsolated == null)
+					if (entry.layout == 'elkLayered')
 					{
-						config.extractIsolated = false;
+						if (config.extractIsolated == null)
+						{
+							config.extractIsolated = false;
+						}
+
+						// Model order breaks crossing-minimization ties so
+						// inserts don't reshuffle the branches (see
+						// Menus.layoutContainers).
+						if (config['elk.layered.considerModelOrder.strategy'] == null)
+						{
+							config['elk.layered.considerModelOrder.strategy'] =
+								Menus.flowModelOrder;
+						}
 					}
 
 					// The manager's re-runs are deliberately non-enforcing for
@@ -23371,17 +23436,13 @@
 				{
 					editorUi.lastLayoutSpec = list;
 
-					// A single selected layout container takes the spec as its
-					// new childLayout instead of a one-shot run (same rule as
-					// the Arrange > Layout menu items).
-					var container = (retargetSelection) ?
-						editorUi.getSelectedLayoutContainer() : null;
-
-					if (container != null && Array.isArray(list) &&
-						list.length > 0)
+					// Selected layout containers take the spec as their new
+					// childLayout instead of a one-shot run (same rule as the
+					// Arrange > Layout menu items).
+					if (retargetSelection && Array.isArray(list) &&
+						list.length > 0 &&
+						editorUi.applyLayoutToSelectedContainers(list))
 					{
-						editorUi.setContainerChildLayout(container, list);
-
 						if (done != null)
 						{
 							done();
@@ -25444,18 +25505,12 @@
 					{
 						var list = JSON.parse(newValue);
 
-						// A single selected layout container takes the list as
-						// its new childLayout instead of a one-shot run (only
-						// for arrays — other parsed JSON keeps the legacy
-						// one-shot path and its error behavior).
-						var container = this.getSelectedLayoutContainer();
-
-						if (container != null && Array.isArray(list) &&
-							list.length > 0)
-						{
-							this.setContainerChildLayout(container, list);
-						}
-						else
+						// Selected layout containers take the list as their new
+						// childLayout instead of a one-shot run (only for
+						// arrays — other parsed JSON keeps the legacy one-shot
+						// path and its error behavior).
+						if (!(Array.isArray(list) && list.length > 0 &&
+							this.applyLayoutToSelectedContainers(list)))
 						{
 							this.executeLayouts(this.editor.graph.createLayouts(list));
 						}
