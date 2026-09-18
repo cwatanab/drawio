@@ -448,16 +448,20 @@ Draw.loadPlugin(function(ui)
 				return el;
 			}
 			var propertyParent = item('プロパティ', null, null, undefined, 'properties', true);
-			properties.forEach(function(group)
+			properties.forEach(function(group, groupIndex)
 			{
-				var parent = item(group.label, null, propertyParent, undefined, 'group-' + group.key, true);
+				if (groupIndex > 0)
+				{
+					menu.addSeparator(propertyParent);
+				}
+
 				group.items.forEach(function(prop)
 				{
 					if (prop[0] == 'constraintPoints')
 					{
 						var current = common(ctx.cells, constraint);
 						var pointParent = item(prop[1] + (current == 'custom' ? '（カスタム）' : ''),
-							null, parent, current === null ? null : undefined, prop[0], true);
+							null, propertyParent, current === null ? null : undefined, prop[0], true);
 						presets.forEach(function(preset)
 						{
 							item(preset[1], function() { apply(ctx, {points: preset[2]}); }, pointParent,
@@ -472,7 +476,7 @@ Draw.loadPlugin(function(ui)
 							var values = {};
 							values[prop[0]] = state === true ? prop[3] : prop[2];
 							apply(ctx, values);
-						}, parent, state, prop[0], prop[0] == 'editable' ? invalid(ctx, true) == null : reason == null);
+						}, propertyParent, state, prop[0], prop[0] == 'editable' ? invalid(ctx, true) == null : reason == null);
 					}
 				});
 			});
