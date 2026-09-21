@@ -25302,9 +25302,9 @@ if (typeof mxVertexHandler !== 'undefined')
 		 *   - transparentBounds=1 (without selectParentFirst): stop at the
 		 *     group boundary so children are selectable directly, like
 		 *     children of a swimlane.
-		 *   - Ordinary groups and containers: stop on the child for normal
+		 *   - Containers: stop on the child for normal
 		 *     clicks. Shape parts and modifier clicks retain base propagation.
-		 *   - Otherwise: fall through to base propagation.
+		 *   - Ordinary groups: retain base parent-first selection and dragging.
 		 */
 		var mxGraphHandlerIsPropagateSelectionCell = mxGraphHandler.prototype.isPropagateSelectionCell;
 		mxGraphHandler.prototype.isPropagateSelectionCell = function(cell, immediate, me)
@@ -25330,6 +25330,7 @@ if (typeof mxVertexHandler !== 'undefined')
 
 				if (this.graph.isTransparentBounds(parent) ||
 					(this.graph.isSelectionContainer(parent) &&
+					this.graph.isContainer(parent) &&
 					!this.graph.isPart(cell) &&
 					!this.graph.isToggleEvent(me.getEvent())))
 				{
