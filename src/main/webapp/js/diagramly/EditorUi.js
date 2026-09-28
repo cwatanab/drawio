@@ -22073,6 +22073,13 @@
 			}
 		}
 
+		// Route new orthogonal connectors around shapes by default.
+		if ((Editor.config == null || Editor.config.defaultEdgeStyle == null) &&
+			graph.defaultEdgeStyle['edgeStyle'] == 'orthogonalEdgeStyle')
+		{
+			setStyle(graph.defaultEdgeStyle, 'libavoidRouting', '1');
+		}
+
 		// Skipped if defaultFonts configured
 		if (Editor.config == null || Editor.config.defaultFonts == null)
 		{

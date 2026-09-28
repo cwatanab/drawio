@@ -27833,12 +27833,6 @@ if (typeof mxVertexHandler !== 'undefined')
 				
 				mxVertexHandler.prototype.rotationHandleVSpacing = -16;
 				
-				// Implements a smaller tolerance for mouse events and a larger tolerance for touch
-				// events on touch devices. The default tolerance (4px) is used for mouse events.
-				mxConstraintHandler.prototype.getTolerance = function(me)
-				{
-					return (mxEvent.isMouseEvent(me.getEvent())) ? 4 : this.graph.getTolerance();
-				};
 			}
 				
 			// One finger pans (no rubberband selection) must start regardless of mouse button
@@ -27864,6 +27858,12 @@ if (typeof mxVertexHandler !== 'undefined')
 						mxEvent.isPopupTrigger(evt));
 			};
 		}
+
+		// Gives mouse users a wider hit area for fixed connection points.
+		mxConstraintHandler.prototype.getTolerance = function(me)
+		{
+			return (mxEvent.isMouseEvent(me.getEvent())) ? 8 : this.graph.getTolerance();
+		};
 
 		// Overrides/extends rubberband for space handling with Ctrl+Shift(+Alt) drag ("scissors tool")
 		mxRubberband.prototype.isSpaceEvent = function(me)
