@@ -8,11 +8,12 @@
     'use strict';
 
     var PLUGIN_NAME = 'Handle Scaler';
-    var PATCH_VERSION = 2;
+    var PATCH_VERSION = 3;
     var VERTEX_HANDLER_MARKER = '__handleScalerVertexHandlerPatched';
     var EDGE_HANDLER_MARKER = '__handleScalerEdgeHandlerPatched';
     var ELBOW_HANDLER_MARKER = '__handleScalerElbowHandlerPatched';
     var CONSTRAINT_HANDLER_MARKER = '__handleScalerConstraintHandlerPatched';
+    var CUSTOM_HANDLE_MARKER = '__handleScalerCustomHandlePatched';
     var GRAPH_LISTENER_MARKER = '__handleScalerGraphListeners';
 
     /**
@@ -86,17 +87,19 @@
     }
 
     var CONFIG = {
-        handleSize: 10,       // 頂点の選択・リサイズハンドルのサイズ（デフォルト: 6〜7）
+        handleSize: 8,            // 頂点の選択・リサイズハンドルのサイズ（デフォルト: 6〜7, 変更前: 10）
         edgeStartHandleSize: 26,  // コネクタ開始点ハンドルのサイズ（現行 draw.io 標準: 18〜22）
-        edgeMiddleHandleSize: 22, // コネクタ中間点・経路変更ハンドルのサイズ（現行 draw.io 標準: 18）
+        edgeMiddleHandleSize: 12, // コネクタ中間点・経路変更ハンドルのサイズ（現行 draw.io 標準: 18, 変更前: 22）
         edgeEndHandleSize: 26,    // コネクタ終了点ハンドルのサイズ（現行 draw.io 標準: 18〜22）
-        labelHandleSize: 6,    // テキストラベルの移動ハンドルのサイズ（デフォルト: 4）
-        connectHandleSize: 10, // コネクタ接続用トリガーハンドルのサイズ（デフォルト: 8）
-        pointImageSize: 6,     // コネクションポイント（青/緑の点）のサイズ（デフォルト: 5）
-        roundHandles: false,   // ハンドルを丸型（円形）にするかどうか
-        minHandleScale: 0.25,  // ズーム時のハンドルサイズの下限倍率（初期値の何倍まで縮小するか）
-        maxHandleScale: 4,     // ズーム時のハンドルサイズの上限倍率（初期値の何倍まで拡大するか）
-        maxPointScale: 2       // ズーム時の接続ポイントサイズの上限倍率（初期値の何倍まで拡大するか）
+        labelHandleSize: 6,       // テキストラベルの移動ハンドルのサイズ（デフォルト: 4）
+        connectHandleSize: 10,    // コネクタ接続用トリガーハンドルのサイズ（デフォルト: 8）
+        pointImageSize: 6,        // コネクションポイント（青/緑の点）のサイズ（デフォルト: 5）
+        roundHandles: false,      // ハンドルを丸型（円形）にするかどうか
+        minHandleScale: 0.5,      // ズーム時のハンドルサイズの下限倍率（初期値の何倍まで縮小するか）
+        maxHandleScale: 1.4,      // ズーム時のハンドルサイズの上限倍率（初期値の何倍まで拡大するか, 変更前: 4）
+        maxPointScale: 2,         // ズーム時の接続ポイントサイズの上限倍率（初期値の何倍まで拡大するか）
+        handleFillOpacity: 30,    // ハンドル塗りの不透明度（%）（ハンドルの下の図形を視認可能にする）
+        handleStrokeOpacity: 90   // ハンドル枠線の不透明度（%）
     };
 
     if (!hasDrawPluginLoader()) {
@@ -138,11 +141,19 @@
          * @returns {mxShape}
          */
         var getSizerShape = function(bounds, index, fillColor) {
+            var shape;
             if (CONFIG.roundHandles) {
-                return new mxEllipse(bounds, fillColor || mxConstants.HANDLE_FILLCOLOR, mxConstants.HANDLE_STROKECOLOR);
+                shape = new mxEllipse(bounds, fillColor || mxConstants.HANDLE_FILLCOLOR, mxConstants.HANDLE_STROKECOLOR);
             } else {
-                return new mxRectangleShape(bounds, fillColor || mxConstants.HANDLE_FILLCOLOR, mxConstants.HANDLE_STROKECOLOR);
+                shape = new mxRectangleShape(bounds, fillColor || mxConstants.HANDLE_FILLCOLOR, mxConstants.HANDLE_STROKECOLOR);
             }
+            if (CONFIG.handleFillOpacity != null) {
+                shape.fillOpacity = CONFIG.handleFillOpacity;
+            }
+            if (CONFIG.handleStrokeOpacity != null) {
+                shape.strokeOpacity = CONFIG.handleStrokeOpacity;
+            }
+            return shape;
         };
 
         /**
@@ -331,7 +342,16 @@
                 if (index !== mxEvent.ROTATION_HANDLE) {
                     return getSizerShape(bounds, index, fillColor);
                 }
-                return originalVertexSizer.apply(this, arguments);
+                var shape = originalVertexSizer.apply(this, arguments);
+                if (shape != null) {
+                    if (CONFIG.handleFillOpacity != null) {
+                        shape.fillOpacity = CONFIG.handleFillOpacity;
+                    }
+                    if (CONFIG.handleStrokeOpacity != null) {
+                        shape.strokeOpacity = CONFIG.handleStrokeOpacity;
+                    }
+                }
+                return shape;
             };
         }
         if (typeof mxEdgeHandler !== 'undefined' && mxEdgeHandler.prototype) {
@@ -373,7 +393,44 @@
             mxElbowEdgeHandler.prototype.createVirtualBend = function() {
                 var bend = originalElbowCreateVirtualBend.apply(this, arguments);
                 setShapeSize(bend, getEdgeHandleSize('middle'), false, false);
+                if (bend != null) {
+                    if (CONFIG.handleFillOpacity != null) {
+                        bend.fillOpacity = CONFIG.handleFillOpacity;
+                    }
+                    if (CONFIG.handleStrokeOpacity != null) {
+                        bend.strokeOpacity = CONFIG.handleStrokeOpacity;
+                    }
+                }
                 return bend;
+            };
+        }
+        if (typeof mxHandle !== 'undefined' && mxHandle.prototype) {
+            var originalHandleCreateShape = getOriginalMethod(
+                mxHandle.prototype,
+                CUSTOM_HANDLE_MARKER,
+                'createShape'
+            );
+            rememberOriginalMethod(
+                mxHandle.prototype,
+                CUSTOM_HANDLE_MARKER,
+                'createShape',
+                originalHandleCreateShape
+            );
+
+            mxHandle.prototype.createShape = function() {
+                var shape = originalHandleCreateShape ? originalHandleCreateShape.apply(this, arguments) : null;
+                if (shape == null) {
+                    var bounds = new mxRectangle(0, 0, mxConstants.HANDLE_SIZE, mxConstants.HANDLE_SIZE);
+                    shape = getSizerShape(bounds, null, mxConstants.HANDLE_FILLCOLOR);
+                } else {
+                    if (CONFIG.handleFillOpacity != null) {
+                        shape.fillOpacity = CONFIG.handleFillOpacity;
+                    }
+                    if (CONFIG.handleStrokeOpacity != null) {
+                        shape.strokeOpacity = CONFIG.handleStrokeOpacity;
+                    }
+                }
+                return shape;
             };
         }
 
@@ -521,6 +578,7 @@
             ', edgeEnd=' + CONFIG.edgeEndHandleSize +
             ', pointSize=' + CONFIG.pointImageSize +
             ', maxPointScale=' + CONFIG.maxPointScale +
+            ', fillOpacity=' + CONFIG.handleFillOpacity +
             ', dynamicZoom=true)');
     });
 })();
