@@ -91,13 +91,13 @@
         edgeStartHandleSize: 26,  // コネクタ開始点ハンドルのサイズ（現行 draw.io 標準: 18〜22）
         edgeMiddleHandleSize: 18, // コネクタ中間点・経路変更ハンドルのサイズ（現行 draw.io 標準: 18, 変更前: 12）
         edgeEndHandleSize: 26,    // コネクタ終了点ハンドルのサイズ（現行 draw.io 標準: 18〜22）
-        labelHandleSize: 6,       // テキストラベルの移動ハンドルのサイズ（デフォルト: 4）
+        labelHandleSize: 8,       // テキストラベルの移動ハンドルのサイズ（デフォルト: 4, 変更前: 6）
         connectHandleSize: 10,    // コネクタ接続用トリガーハンドルのサイズ（デフォルト: 8）
-        pointImageSize: 6,        // コネクションポイント（青/緑の点）のサイズ（デフォルト: 5）
+        pointImageSize: 8,        // コネクションポイント（青/緑の点）のサイズ（デフォルト: 5, 変更前: 6）
         roundHandles: false,      // ハンドルを丸型（円形）にするかどうか
         minHandleScale: 0.5,      // ズーム時のハンドルサイズの下限倍率（初期値の何倍まで縮小するか）
         maxHandleScale: 4,        // ズーム時のハンドルサイズの上限倍率（初期値の何倍まで拡大するか）
-        maxPointScale: 2,         // ズーム時の接続ポイントサイズの上限倍率（初期値の何倍まで拡大するか）
+        maxPointScale: 4,         // ズーム時の接続ポイントサイズの上限倍率（初期値の何倍まで拡大するか, 変更前: 2）
         handleFillOpacity: 30,    // ハンドル塗りの不透明度（%）（ハンドルの下の図形を視認可能にする）
         handleStrokeOpacity: 90   // ハンドル枠線の不透明度（%）
     };
