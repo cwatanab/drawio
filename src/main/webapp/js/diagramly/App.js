@@ -4,12 +4,8 @@
  */
 
 /**
- * Constructs a new point for the optional x and y coordinates. If no
- * coordinates are given, then the default values for <x> and <y> are used.
- * @constructor
- * @class Implements a basic 2D point. Known subclassers = {@link mxRectangle}.
- * @param {number} x X-coordinate of the point.
- * @param {number} y Y-coordinate of the point.
+ * Constructs a new application for the given editor in the given container.
+ * If lightbox is null, it is derived from the URL parameters.
  */
 App = function(editor, container, lightbox)
 {
@@ -25,7 +21,7 @@ App = function(editor, container, lightbox)
 		if (file != null)
 		{
 			EditorUi.logEvent({category: ((this.editor.autosave) ? 'ON' : 'OFF') +
-				'-AUTOSAVE-FILE-' + file.getHash(), action: 'changed',
+				'-AUTOSAVE-FILE-' + EditorUi.getLogHash(file.getHash()), action: 'changed',
 				label: 'autosave_' + ((this.editor.autosave) ? 'on' : 'off')});
 		}
 	}));
@@ -1092,10 +1088,11 @@ App.main = function(callback, createUi)
 				// ignore
 			}
 			
-			// Loads Pusher API
+			// Loads Pusher API, but not in lockdown where the realtime cache
+			// that sends its messages is off (see Editor.enableRealtimeCache)
 			if (('ArrayBuffer' in window) && !mxClient.IS_CHROMEAPP && !EditorUi.isElectronApp &&
 				DrawioFile.SYNC == 'auto' && (urlParams['embed'] != '1' ||
-				(urlParams['embedRT'] == '1' && urlParams['lockdown'] != '1')) && 
+				urlParams['embedRT'] == '1') && urlParams['lockdown'] != '1' &&
 				urlParams['local'] != '1' &&
 				(urlParams['chrome'] != '0' || urlParams['rt'] == '1') &&
 				urlParams['stealth'] != '1' && urlParams['offline'] != '1')
@@ -1879,10 +1876,8 @@ App.prototype.initializeViewerMode = function()
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Initializes the UI and creates the clients for the enabled storage
+ * services. Does nothing if the app runs in a blocked frame.
  */
 App.prototype.init = function()
 {
@@ -2218,8 +2213,17 @@ App.prototype.init = function()
 		else
 		{
 			this.mode = App.mode;
+
+			// Ignores a stored or requested mode for a storage whose support has
+			// ended unless it was enabled explicitly (db=1, tr=1), so that the
+			// storage can be changed instead of opening a picker that is missing
+			if ((this.mode == App.MODE_DROPBOX || this.mode == App.MODE_TRELLO) &&
+				!this.isModeEnabled(this.mode))
+			{
+				this.mode = null;
+			}
 		}
-		
+
 		// Add to Home Screen dialog for mobile devices
 		if ('serviceWorker' in navigator && !this.editor.isChromelessView() &&
 			(mxClient.IS_ANDROID || mxClient.IS_IOS))
@@ -2874,6 +2878,64 @@ App.prototype.handleLicense = function(lic, domain)
 };
 
 /**
+ * Reports the first successful save of a Google Drive diagram each month to
+ * the licence endpoint (DriveClient.checkLicense). It counts the editors of
+ * the user's Workspace domain and says if the user holds one of the domain's
+ * floating seats, which only goes to handleLicense for now. Tried once per
+ * page load until it succeeds, then once a month per user and browser, and
+ * editing never waits for it or depends on it. Preprod only until the ws
+ * worker is deployed for app.diagrams.net (its README): until then the
+ * request would go to the App Engine origin.
+ */
+App.prototype.reportDriveEdit = function()
+{
+	var user = (this.drive != null) ? this.drive.getUser() : null;
+
+	if (user != null && user.id != null && !this.isOffline() && urlParams['dev'] != '1' &&
+		window.location.hostname == 'preprod.diagrams.net')
+	{
+		var month = new Date().toISOString().substring(0, 7);
+		var key = '.drive-edit-' + Editor.crc32(user.id);
+		var reported = null;
+
+		try
+		{
+			reported = (isLocalStorage) ? localStorage.getItem(key) : null;
+		}
+		catch (e)
+		{
+			// ignore
+		}
+
+		this.driveEditsReported = this.driveEditsReported || {};
+
+		if (reported != month && !this.driveEditsReported[user.id] &&
+			this.drive.checkLicense(true, mxUtils.bind(this, function(lic)
+			{
+				try
+				{
+					if (isLocalStorage)
+					{
+						localStorage.setItem(key, month);
+					}
+				}
+				catch (e)
+				{
+					// ignore
+				}
+
+				this.handleLicense(lic, null);
+			}), function()
+			{
+				// Fails open
+			}))
+		{
+			this.driveEditsReported[user.id] = true;
+		}
+	}
+};
+
+/**
  * 
  */
 App.prototype.getEditBlankXml = function()
@@ -3021,10 +3083,9 @@ App.prototype.onBeforeUnload = function()
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Updates the document title with the title of the current file and the app
+ * name, or the name of the current page in lightbox view and the simple
+ * theme.
  */
 App.prototype.updateDocumentTitle = function()
 {
@@ -3291,10 +3352,8 @@ App.prototype.getThumbnail = function(width, fn, border)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Overrides setMode to update Editor.useLocalStorage and the tooltip of the
+ * app icon, and to store the mode if remember is true.
  */
 (function()
 {
@@ -3371,9 +3430,8 @@ App.prototype.getThumbnail = function(width, fn, border)
 })();
 
 /**
- * Function: authorize
- * 
- * Authorizes the client, gets the userId and calls <open>.
+ * Opens the URL of the current file, or of its folder if Alt is pressed, or
+ * the start page of the storage of the current file.
  */
 App.prototype.appIconClicked = function(evt)
 {
@@ -3664,7 +3722,8 @@ App.prototype.showRefreshDialog = function(title, message)
 };
 
 /**
- * Called in start after the spinner stops.
+ * Shows the given message in a closable alert that hides itself after a
+ * delay.
  */
 App.prototype.showAlert = function(message)
 {
@@ -3728,10 +3787,9 @@ App.prototype.showAlert = function(message)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Starts the app after initialization. Restores the libraries, installs the
+ * global error and hash change handlers and opens the diagram specified in
+ * the URL, or shows the splash screen.
  */
 App.prototype.start = function()
 {
@@ -4232,10 +4290,9 @@ App.prototype.start = function()
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Creates a new diagram from the given create object, whose data can be
+ * XML, CSV, Mermaid or a prompt for generating a diagram, and invokes done.
+ * Applies the optional layouts and stores the resulting XML in the URL hash.
  */
 App.prototype.executeCreateObject = function(value, done)
 {
@@ -4686,10 +4743,143 @@ App.prototype.checkDrafts = function()
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Returns true if the Home screen (HomeDialog) replaces the splash dialog:
+ * Google Drive mode in the full app. While it is tested, only on preprod or
+ * with ?home=1, and never with ?home=0. HomeDialog.js is only bundled next
+ * to DriveClient.js (app.min.js).
+ */
+App.prototype.isHomeEnabled = function()
+{
+	return this.mode == App.MODE_GOOGLE && this.drive != null && typeof HomeDialog === 'function' &&
+		urlParams['home'] != '0' &&
+		(urlParams['home'] == '1' || window.location.hostname == 'preprod.diagrams.net') &&
+		!this.editor.chromeless && urlParams['embed'] != '1' && urlParams['noFileMenu'] != '1' &&
+		!mxClient.IS_CHROMEAPP && !EditorUi.isElectronApp;
+};
+
+/**
+ * Shows the Home screen. Opened with no file (at startup, or after the new
+ * diagram dialog is cancelled), closing it creates a blank diagram, like the
+ * splash dialog. Background clicks don't close it, since that would create
+ * that diagram by accident.
+ */
+App.prototype.showHome = function()
+{
+	if (!this.isHomeEnabled())
+	{
+		return;
+	}
+
+	var startup = this.getCurrentFile() == null;
+	var dlg = new HomeDialog(this, startup);
+	var w = Math.max(280, Math.min(960, window.innerWidth - 96));
+	var h = Math.max(320, Math.min(640, window.innerHeight - 96));
+
+	this.showDialog(dlg.container, w, h, true, true, mxUtils.bind(this, function(cancel, isEsc)
+	{
+		dlg.destroy();
+
+		if ((cancel || isEsc) && startup && this.getCurrentFile() == null)
+		{
+			var prev = Editor.useLocalStorage;
+			this.createFile(this.defaultFilename, null, null, null, null, null, null,
+				urlParams['local'] != '1');
+			Editor.useLocalStorage = prev;
+		}
+	}), null, null, null, true);
+
+	dlg.init();
+};
+
+/**
+ * Asks for access to a Google Drive file that returned 404 (drive.file only
+ * sees files the user created or picked with draw.io). Allow access opens
+ * the Google Picker limited to that file, and picking it grants the file and
+ * loads it. Returns false if the Picker isn't available.
+ */
+App.prototype.showDriveAccessDialog = function(id, changeUserFn, cancelFn)
+{
+	if (this.drive == null || !DriveClient.isFileId(id) ||
+		typeof google === 'undefined' || google.picker == null)
+	{
+		return false;
+	}
+
+	var div = document.createElement('div');
+	div.className = 'geHomeAccess';
+
+	var hd = document.createElement('h3');
+	mxUtils.write(hd, mxResources.get('allowAccessTitle', null, 'Allow access to this diagram'));
+	div.appendChild(hd);
+
+	var user = this.drive.getUser();
+	var msg = document.createElement('div');
+	msg.style.lineHeight = 'normal';
+	mxUtils.write(msg, mxResources.get('allowAccessMessage', [(user != null && user.email != null) ?
+		user.email : mxResources.get('googleDrive')], 'draw.io can only open the Google Drive files ' +
+		'you choose. Select this diagram in the Google file picker to open it. If it isn\'t listed, ' +
+		'it doesn\'t exist or isn\'t shared with {1}.'));
+	div.appendChild(msg);
+
+	// Secondary actions as links, so the buttons are only Cancel and Allow access
+	var links = document.createElement('div');
+	links.className = 'geHomeLinks';
+
+	var openInDrive = mxUtils.button(mxResources.get('openInGoogleDrive', null,
+		'Open in Google Drive'), mxUtils.bind(this, function()
+	{
+		// The file viewer shows Drive's own page for missing or inaccessible
+		// files, where /open?id= shows a generic 404 page
+		this.openLink('https://drive.google.com/file/d/' + encodeURIComponent(id) + '/view');
+	}));
+	openInDrive.className = 'geHomeLink';
+	links.appendChild(openInDrive);
+
+	if (changeUserFn != null)
+	{
+		var changeUser = mxUtils.button(mxResources.get('changeUser'), mxUtils.bind(this, function()
+		{
+			this.hideDialog();
+			changeUserFn();
+		}));
+		changeUser.className = 'geHomeLink';
+		links.appendChild(changeUser);
+	}
+
+	div.appendChild(links);
+
+	var dlg = new CustomDialog(this, div, mxUtils.bind(this, function()
+	{
+		this.drive.pickDiagrams({fileIds: [id], title: mxResources.get('allowAccessTitle', null,
+			'Allow access to this diagram')}, mxUtils.bind(this, function(docs)
+		{
+			if (docs.length > 0)
+			{
+				this.loadFile('G' + docs[0].id, true);
+			}
+			else if (cancelFn != null)
+			{
+				cancelFn();
+			}
+		}), cancelFn);
+	}), cancelFn, mxResources.get('allowAccess', null, 'Allow access'));
+
+	// Escape closes the dialog without the Cancel button
+	this.showDialog(dlg.container, 420, null, true, false, function(cancel, isEsc)
+	{
+		if (isEsc && cancelFn != null)
+		{
+			cancelFn();
+		}
+	});
+
+	return true;
+};
+
+/**
+ * Shows the dialog for selecting the storage if no mode is set or force is
+ * true, followed by the splash dialog or the home screen. Closing the splash
+ * dialog creates a blank diagram.
  */
 App.prototype.showSplash = function(force)
 {
@@ -4703,6 +4893,13 @@ App.prototype.showSplash = function(force)
 	
 	var showSecondDialog = mxUtils.bind(this, function()
 	{
+		if (this.isHomeEnabled())
+		{
+			this.showHome();
+
+			return;
+		}
+
 		var dlg = new SplashDialog(this);
 		
 		this.showDialog(dlg.container, 340, (mxClient.IS_CHROMEAPP ||
@@ -4749,10 +4946,8 @@ App.prototype.showSplash = function(force)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Adds a globe icon with an optional label for the language menu to the
+ * given element and returns the icon.
  */
 App.prototype.addLanguageMenu = function(elt, addLabel, right)
 {
@@ -4958,7 +5153,8 @@ App.prototype.createFileSystemOptions = function(name)
 };
 
 /**
- * Loads the given file handle as a local file.
+ * Shows the save file picker with the given options and passes the file
+ * handle and its File object to success.
  */
 App.prototype.showSaveFilePicker = function(success, error, opts)
 {
@@ -4985,10 +5181,8 @@ App.prototype.showSaveFilePicker = function(success, error, opts)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Shows the file picker for opening a file in the given or current storage
+ * mode.
  */
 App.prototype.pickFile = function(mode)
 {
@@ -5149,10 +5343,8 @@ App.prototype.pickFile = function(mode)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Shows the file picker for opening a library in the given or current
+ * storage mode and adds the picked library to the sidebar.
  */
 App.prototype.pickLibrary = function(mode)
 {
@@ -5304,10 +5496,10 @@ App.prototype.pickLibrary = function(mode)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Saves the given images as a library with the given name. If file is null,
+ * a new library is created in a folder picked for the given or current
+ * storage mode, otherwise the given library is renamed if needed and saved.
+ * Invokes fn after saving or on error.
  */
 App.prototype.saveLibrary = function(name, images, file, mode, noSpin, noReload, fn)
 {
@@ -5466,7 +5658,10 @@ App.prototype.saveLibrary = function(name, images, file, mode, noSpin, noReload,
 };
 
 /**
- * Adds the label menu items to the given menu and parent.
+ * Saves the current file under its title. Shows a dialog for the filename
+ * and location instead if forceDialog is true, if the file has no title or
+ * valid file handle, or if no storage mode is set. Invokes success after
+ * saving.
  */
 App.prototype.saveFile = function(forceDialog, success)
 {
@@ -5674,10 +5869,9 @@ App.prototype.saveFile = function(forceDialog, success)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Loads the template from the given URL, via the proxy if CORS is not
+ * enabled, and passes its diagram data to onload. Visio, Gliffy, Lucidchart
+ * and PNG files are converted.
  */
 App.prototype.loadTemplate = function(url, onload, onerror, templateFilename, asLibrary)
 {
@@ -5802,10 +5996,7 @@ App.prototype.getModeForChar = function(char)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Returns true if the storage for the given mode is available and enabled.
  */
 App.prototype.isModeEnabled = function(mode)
 {
@@ -5871,10 +6062,8 @@ App.prototype.isModeReady = function(mode)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Returns the given file data with the compressed diagrams replaced by their
+ * XML. Returns the data unchanged if it cannot be parsed.
  */
 App.prototype.uncompressPages = function(data)
 {
@@ -5913,10 +6102,9 @@ App.prototype.uncompressPages = function(data)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Creates a new file with the given title and data, or an empty diagram, in
+ * the given or current storage mode and passes it to fileCreated. Temporary
+ * files are created as local files without a storage mode.
  */
 App.prototype.createFile = function(title, data, libs, mode, done, replace, folderId, tempFile, clibs, success)
 {
@@ -6035,10 +6223,9 @@ App.prototype.createFile = function(title, data, libs, mode, done, replace, fold
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Saves the data of the given new file, which needs the ID of the file for
+ * the redirect, and opens the file in a new window if replace is false or in
+ * this window otherwise. The given libraries are loaded after opening.
  */
 App.prototype.fileCreated = function(file, libs, replace, done, clibs, success)
 {
@@ -6204,10 +6391,10 @@ App.prototype.fileCreated = function(file, libs, replace, done, clibs, success)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Loads the file with the given ID, or the given file if it is already
+ * loaded. If a file is open and sameWindow is false, a dialog offers to open
+ * the file in a new window. Asks before discarding changes unless force is
+ * true.
  */
 App.prototype.loadFile = function(id, sameWindow, file, success, force)
 {
@@ -6707,10 +6894,8 @@ App.prototype.loadFile = function(id, sameWindow, file, success, force)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Returns the tooltip for the given library, which contains its title, hash
+ * and storage name.
  */
 App.prototype.getLibraryStorageHint = function(file)
 {
@@ -6754,7 +6939,7 @@ App.prototype.getLibraryStorageHint = function(file)
 };
 
 /**
- * Updates action states depending on the selection.
+ * Loads the custom libraries from the settings and the clibs URL parameter.
  */
 App.prototype.restoreLibraries = function()
 {
@@ -6778,7 +6963,8 @@ App.prototype.restoreLibraries = function()
 };
 
 /**
- * Updates action states depending on the selection.
+ * Loads the libraries with the given IDs into the sidebar and invokes done
+ * when all libraries are loaded.
  */
 App.prototype.loadLibraries = function(libs, done)
 {
@@ -7056,10 +7242,9 @@ App.prototype.loadLibraries = function(libs, done)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Updates the notification, comment, share and user buttons for the current
+ * file and theme. Notifications are not fetched if skipNotifications is
+ * true.
  */
 App.prototype.updateButtonContainer = function(skipNotifications)
 {
@@ -7279,7 +7464,9 @@ App.prototype.updateButtonContainer = function(skipNotifications)
  */
 App.prototype.fetchAndShowNotification = function(target, subtarget)
 {
-	if (this.fetchingNotif || NOTIFICATIONS_URL == null)
+	// Plugins call this directly (eg. Confluence Cloud), so the offline
+	// check of updateButtonContainer (which includes lockdown) is repeated
+	if (this.fetchingNotif || NOTIFICATIONS_URL == null || this.isOffline())
 	{
 		return;	
 	}
@@ -7542,10 +7729,9 @@ App.prototype.showNotification = function(notifs, lsReadFlag)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Saves the current file, or saves it with the given name if the name
+ * differs from its title, and invokes done after a successful save. Failed
+ * saves can be retried.
  */
 App.prototype.save = function(name, done)
 {
@@ -7935,10 +8121,8 @@ App.prototype.exportFile = function(data, filename, mimeType, base64Encoded, mod
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Updates the filename, the editable state, the document title and the URL
+ * hash for the current file and fires a fileDescriptorChanged event.
  */
 App.prototype.descriptorChanged = function()
 {
@@ -8000,7 +8184,8 @@ App.prototype.descriptorChanged = function()
 };
 
 /**
- * Adds the listener for automatically saving the diagram for local changes.
+ * Shows the authorization dialog for the given storage peer. Invokes fn with
+ * the remember option and a function that closes the dialog.
  */
 App.prototype.showAuthDialog = function(peer, showRememberOption, fn, closeFn)
 {
@@ -8509,39 +8694,29 @@ App.prototype.updateFullscreenState = function()
 };
 
 /**
- * Adds the listener for automatically saving the diagram for local changes.
+ * Returns the user of the first client in the given list that has a user.
+ */
+App.prototype.getFirstClientUser = function(clients)
+{
+	for (var i = 0; i < clients.length; i++)
+	{
+		if (clients[i] != null && clients[i].getUser() != null)
+		{
+			return clients[i].getUser();
+		}
+	}
+
+	return null;
+};
+
+/**
+ * Returns the user for the user button and accounts menu.
  */
 App.prototype.getMainUser = function()
 {
-	var user = null;
-
 	// LATER: Trello no user issue
-	if (this.drive != null && this.drive.getUser() != null)
-	{
-		user = this.drive.getUser();
-	}
-	else if (this.oneDrive != null && this.oneDrive.getUser() != null)
-	{
-		user = this.oneDrive.getUser();
-	}
-	else if (this.m365 != null && this.m365.getUser() != null)
-	{
-		user = this.m365.getUser();
-	}
-	else if (this.dropbox != null && this.dropbox.getUser() != null)
-	{
-		user = this.dropbox.getUser();
-	}
-	else if (this.gitHub != null && this.gitHub.getUser() != null)
-	{
-		user = this.gitHub.getUser();
-	}
-	else if (this.gitLab != null && this.gitLab.getUser() != null)
-	{
-		user = this.gitLab.getUser();
-	}
-
-	return user;
+	return this.getFirstClientUser([this.drive, this.oneDrive,
+		this.m365, this.dropbox, this.gitHub, this.gitLab]);
 };
 
 /**
@@ -9104,31 +9279,9 @@ App.prototype.toggleUserPanel = function()
 //TODO Use this function to get the currently logged in user
 App.prototype.getCurrentUser = function()
 {
-	var user = null;
-	
-	if (this.drive != null && this.drive.getUser() != null)
-	{
-		user = this.drive.getUser();
-	}
-	else if (this.oneDrive != null && this.oneDrive.getUser() != null)
-	{
-		user = this.oneDrive.getUser();
-	}
-	else if (this.m365 != null && this.m365.getUser() != null)
-	{
-		user = this.m365.getUser();
-	}
-	else if (this.dropbox != null && this.dropbox.getUser() != null)
-	{
-		user = this.dropbox.getUser();
-	}
-	else if (this.gitHub != null && this.gitHub.getUser() != null)
-	{
-		user = this.gitHub.getUser();
-	}
 	//TODO Trello no user issue
-	
-	return user;
+	return this.getFirstClientUser([this.drive, this.oneDrive,
+		this.m365, this.dropbox, this.gitHub]);
 };
 
 /**

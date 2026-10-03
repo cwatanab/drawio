@@ -2840,7 +2840,6 @@ ArrangePanel.prototype.addGeometry = function(container)
 	autosizeBtn.style.width = '21px';
 	autosizeBtn.style.height = '21px';
 	autosizeBtn.style.left = '52px';
-	mxUtils.setOpacity(autosizeBtn, 50);
 	autosizeBtn.setAttribute('title', mxResources.get('autosize'));
 
 	mxEvent.addListener(autosizeBtn, 'click', function()
@@ -3473,7 +3472,7 @@ ArrangePanel.prototype.addGeometryHandler = function(input, fn)
 			}
 			else if (value != initialValue)
 			{
-				graph.getModel().beginUpdate();
+				var arrange = graph.beginArrange();
 				try
 				{
 					var cells = ui.getSelectionState().cells;
@@ -3506,7 +3505,7 @@ ArrangePanel.prototype.addGeometryHandler = function(input, fn)
 				}
 				finally
 				{
-					graph.getModel().endUpdate();
+					graph.endArrange(arrange);
 				}
 				
 				initialValue = value;
@@ -7565,19 +7564,34 @@ StyleFormatPanel.prototype.addEffects = function(div)
 		{
 			addOption(mxResources.get('flowAnimation'), 'flowAnimation', 0);
 
-			// Orthogonal routings already imply orthogonal ends
+			// Orthogonal routings already imply orthogonal ends and
+			// libavoid re-routes its edges when a terminal moves
 			var implied = false;
+			var routed = false;
 
-			for (var i = 0; i < ss.edges.length && !implied; i++)
+			for (var i = 0; i < ss.edges.length; i++)
 			{
 				var state = graph.view.getState(ss.edges[i]);
-				implied = state != null && graph.isOrthogonalEdgeStyle(
-					graph.view.getEdgeStyle(state));
+
+				if (state != null)
+				{
+					implied = implied || graph.isOrthogonalEdgeStyle(
+						graph.view.getEdgeStyle(state));
+					routed = routed || mxUtils.getValue(state.style,
+						'libavoidRouting', null) == '1';
+				}
 			}
 
 			if (!implied)
 			{
 				addOption(mxResources.get('orthogonalEnds'), mxConstants.STYLE_ORTHOGONAL, 0);
+			}
+
+			// Moves the waypoints along with the terminals (see Graph.initFollowTerminals)
+			if (!routed)
+			{
+				addOption(mxResources.get('followTerminals', null, 'Follow Terminals'),
+					'followTerminals', 0);
 			}
 		}
 		
@@ -7938,7 +7952,18 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 						}
 					}
 				}
-				
+
+				// Disabling the font color in the Text tab also sets noLabel=1,
+				// which must be removed if the font color is enabled again here.
+				// Uses the unresolved style as resolving removes none values.
+				if (mxUtils.getValue(graph.getCellStyle(cells[i], false),
+					mxConstants.STYLE_FONTCOLOR, null) == mxConstants.NONE &&
+					((ignoreGraphStyle && edge) ? 'default' :
+					current[mxConstants.STYLE_FONTCOLOR]) != mxConstants.NONE)
+				{
+					newStyle = mxUtils.setStyle(newStyle, mxConstants.STYLE_NOLABEL, null);
+				}
+
 				model.setStyle(cells[i], newStyle);
 			}
 		}

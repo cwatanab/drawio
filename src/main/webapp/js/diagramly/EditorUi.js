@@ -365,6 +365,70 @@
 	};
 
 	/**
+	 * Returns the given file hash for logs: the type character (eg. G for
+	 * Google Drive, U for a URL, R for a diagram encoded in the URL) followed
+	 * by a hash of the rest, so no diagram data, raw file id or URL is logged
+	 * while entries for the same file still correlate.
+	 */
+	EditorUi.getLogHash = function(hash)
+	{
+		return (hash != null && hash.length > 0) ? hash.charAt(0) +
+			((hash.length > 1) ? '.' + EditorUi.prototype.hashValue(
+				hash.substring(1)) : '') : '';
+	};
+
+	/**
+	 * Returns the location of this page for logs: origin and path, the names
+	 * but not the values of the URL parameters and the hash as in getLogHash.
+	 */
+	EditorUi.getLogUrl = function()
+	{
+		var loc = window.location;
+		var result = loc.protocol + '//' + loc.host + loc.pathname;
+
+		if (loc.search.length > 1)
+		{
+			var params = loc.search.substring(1).split('&');
+			var names = [];
+
+			for (var i = 0; i < params.length; i++)
+			{
+				names.push(params[i].split('=')[0]);
+			}
+
+			result += '?' + names.join('&');
+		}
+
+		if (loc.hash.length > 1)
+		{
+			result += '#' + EditorUi.getLogHash(loc.hash.substring(1));
+		}
+
+		return result;
+	};
+
+	/**
+	 * Replaces the location of this page in the given text, eg. a stack
+	 * trace with inline scripts, with the location returned by getLogUrl.
+	 */
+	EditorUi.anonymizeLogText = function(text, logUrl)
+	{
+		if (text != null && text.length > 0)
+		{
+			var loc = window.location;
+			text = text.split(loc.href).join(logUrl);
+
+			if (loc.hash.length > 1)
+			{
+				text = text.split(loc.hash).join('#' +
+					EditorUi.getLogHash(loc.hash.substring(1)));
+			}
+		}
+
+		return text;
+	};
+
+	/**
 	 * Updates action states depending on the selection.
 	 */
 	EditorUi.logError = function(message, url, linenumber, colno, err, severity, quiet)
@@ -388,18 +452,23 @@
 				{
 					EditorUi.lastErrorMessage = message;
 
+					// The hash can hold the diagram (#R) or a file id and the
+					// parameters can hold names, URLs or tokens (see getLogUrl)
+					var logUrl = EditorUi.getLogUrl();
 					var img = new Image();
 					var logDomain = window.DRAWIO_LOG_URL != null ?
 						window.DRAWIO_LOG_URL : '';
 					img.src = logDomain + '/log?severity=' + severity +
 						'&v=' + encodeURIComponent(EditorUi.VERSION) +
-						'&msg=clientError:' + encodeURIComponent(message) +
-						':url:' + encodeURIComponent(window.location.href) +
+						'&msg=clientError:' + encodeURIComponent(
+							EditorUi.anonymizeLogText(message, logUrl)) +
+						':url:' + encodeURIComponent(logUrl) +
 						':lnum:' + encodeURIComponent(linenumber) +
 						((colno != null) ?
 							':colno:' + encodeURIComponent(colno) : '') +
 						((err.stack != '') ?
-							'&stack=' + encodeURIComponent(err.stack) : '');
+							'&stack=' + encodeURIComponent(
+								EditorUi.anonymizeLogText(err.stack, logUrl)) : '');
 				}
 			}
 			catch (e)
@@ -468,109 +537,13 @@
 				}
 				
 				mxUtils.post('/email', 'version=' + encodeURIComponent(EditorUi.VERSION) +
-					'&url=' + encodeURIComponent(window.location.href) +
+					'&url=' + encodeURIComponent(EditorUi.getLogUrl()) +
 					'&data=' + encodeURIComponent(data));
 			}
 			catch (e)
 			{
 				// ignore
 			}
-		}
-	};
-
-	/**
-	 * Temporary telemetry for the realtime v7 rollout, remove after the
-	 * soak (set to false or revert the commit that added it). Sends
-	 * anomaly counters as WARNING entries to the log endpoint so the
-	 * release can be watched per client version in Logs Explorer
-	 * (textPayload:"CLIENT-LOG:rt7:"). A message carries the hashed file
-	 * id, the file mode, the random sync client id and short sanitized
-	 * fields only - no URL, stack, labels or user ids.
-	 */
-	EditorUi.realtimeTelemetry = true;
-
-	/**
-	 * Share of page loads that also run the sampled checks (snapshot drift
-	 * and the session summary) in addition to the anomaly events.
-	 */
-	EditorUi.realtimeTelemetrySampled = Math.random() < 0.02;
-
-	/**
-	 * Events sent per name and page load, keyed events fire once per key.
-	 */
-	EditorUi.realtimeTelemetryMax = 10;
-
-	/**
-	 * Counts sent events per name and key for the caps above.
-	 */
-	EditorUi.realtimeTelemetryCounts = Object.create(null);
-
-	/**
-	 * Sends an rt7 telemetry event. Fields are reduced to a short safe
-	 * charset. A file adds its hashed id, mode and sync client id and is
-	 * flagged so that its session summary is reported on close. Beacon
-	 * sends via sendBeacon for page unloads.
-	 */
-	EditorUi.logRealtime = function(name, fields, file, key, beacon)
-	{
-		try
-		{
-			if (EditorUi.realtimeTelemetry && name != null)
-			{
-				var id = name + ((key != null) ? ':' + key : '');
-				var count = EditorUi.realtimeTelemetryCounts[id] || 0;
-
-				if (count < ((key != null) ? 1 : EditorUi.realtimeTelemetryMax))
-				{
-					EditorUi.realtimeTelemetryCounts[id] = count + 1;
-
-					var clean = function(value)
-					{
-						return String(value).replace(/[^A-Za-z0-9._-]/g, '').substring(0, 32);
-					};
-
-					var msg = 'rt7:' + clean(name);
-
-					if (file != null)
-					{
-						file.realtimeTelemetryFlagged = true;
-						msg += ':f=' + file.ui.hashValue(file.getId()) +
-							((file.getMode() != null) ? ',m=' + clean(file.getMode()) : '') +
-							((file.sync != null) ? ',c=' + clean(file.sync.clientId) : '');
-					}
-
-					if (fields != null)
-					{
-						for (var k in fields)
-						{
-							if (fields[k] != null)
-							{
-								msg += ',' + clean(k) + '=' + clean(fields[k]);
-							}
-						}
-					}
-
-					if (urlParams['dev'] == '1')
-					{
-						EditorUi.debug('logRealtime', msg);
-					}
-					else if (EditorUi.enableLogging)
-					{
-						var url = ((window.DRAWIO_LOG_URL != null) ? window.DRAWIO_LOG_URL : '') +
-							'/log?severity=WARNING&v=' + encodeURIComponent(EditorUi.VERSION) +
-							'&msg=' + encodeURIComponent(msg);
-
-						if (!beacon || navigator.sendBeacon == null || !navigator.sendBeacon(url))
-						{
-							new Image().src = url;
-						}
-					}
-				}
-			}
-		}
-		catch (e)
-		{
-			// ignore
 		}
 	};
 
@@ -1498,10 +1471,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Creates a spinner of the given size at the given position, or centered on
+	 * the page if no position is given. Its spin method accepts a label, an
+	 * error handler that is invoked on timeout and the timeout.
 	 */
 	EditorUi.prototype.createSpinner = function(x, y, size)
 	{
@@ -1740,7 +1712,7 @@
 	 */
 	EditorUi.isVisioFilename = function(filename)
 	{
-		return (/(\.v(dx|sdx?))($|\?)/i.test(filename) ||
+		return (/(\.v(dx|sdx?|stx?))($|\?)/i.test(filename) ||
 			/(\.vs(x|sx?))($|\?)/i.test(filename));
 	};
 
@@ -2165,7 +2137,7 @@
 	{
 		var ts = new Date(modifiedDate);
 
-		return (!isNaN(ts.getTime()) && ts.getTime() >= 0) ? ts.toLocaleString() : null;
+		return (!isNaN(ts.getTime()) && ts.getTime() >= 0) ? this.formatDateTime(ts) : null;
 	};
 
 	/**
@@ -2303,10 +2275,10 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 *
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the file data for the given XML node, which is wrapped in an
+	 * mxfile node if needed. The data is written as HTML or SVG with the
+	 * embedded XML if forced or if the title of the given file has that
+	 * extension, otherwise as XML.
 	 */
 	EditorUi.prototype.createFileData = function(node, graph, file, url, forceXml, forceSvg, forceHtml,
 		embeddedCallback, ignoreSelection, compact, uncompressed, scale, border)
@@ -2457,10 +2429,9 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the mxfile node with all pages, or only the current page if
+	 * currentPage is true, compressed unless uncompressed is true. If
+	 * ignoreSelection is false, the graph model of the selection is returned.
 	 */
 	EditorUi.prototype.getXmlFileData = function(ignoreSelection, currentPage, uncompressed, resolveReferences)
 	{
@@ -2568,7 +2539,10 @@
 	};
 	
 	/**
-	 * Removes any values, styles and geometries from the given XML node.
+	 * Returns the given text with letters and digits replaced by random ones, or
+	 * digits replaced by zeros if zeros is true. Whitespace is replaced by a
+	 * space and other characters by a question mark, except for the ignored
+	 * characters.
 	 */
 	EditorUi.prototype.anonymizeString = function(text, zeros)
 	{
@@ -2879,10 +2853,8 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Synchronizes the current file with its latest version, or reloads it if
+	 * forceReload is true.
 	 */
 	EditorUi.prototype.synchronizeCurrentFile = function(forceReload)
 	{
@@ -2930,10 +2902,9 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the data of the current file, or the given node, as XML, SVG or
+	 * HTML depending on the force flags and the title of the given or current
+	 * file. SVG data is created for the first page.
 	 */
 	EditorUi.prototype.getFileData = function(forceXml, forceSvg, forceHtml, embeddedCallback,
 		ignoreSelection, currentPage, node, compact, file, uncompressed, resolveReferences,
@@ -3397,8 +3368,8 @@
 				}
 				
 				EditorUi.logEvent({category: file.getMode().toUpperCase() +
-					'-FILE-STATS-' + file.getHash(), action: 'size_' + file.getSize(),
-					label: JSON.stringify(stats)});
+					'-FILE-STATS-' + EditorUi.getLogHash(file.getHash()),
+					action: 'size_' + file.getSize(), label: JSON.stringify(stats)});
 			}
 		}
 		catch (e)
@@ -3408,10 +3379,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the title of the current file without the xml, html, svg, png and
+	 * drawio extensions, followed by the name of the current page if there are
+	 * multiple pages and ignorePageName is false.
 	 */
 	// Note: Remember to adjust ElectronApp override when this function is modified
 	EditorUi.prototype.getBaseFilename = function(ignorePageName)
@@ -3441,10 +3411,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Downloads the current file, page or selection in the given format with the
+	 * given export options.
 	 */
 	EditorUi.prototype.downloadFile = function(format, uncompressed, addShadow, ignoreSelection,
 		currentPage, pageVisible, transparent, scale, border, grid, includeXml, pageRange, margin,
@@ -3623,10 +3591,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the parameters of the export request for the given filename,
+	 * format and export options with the data of the current file, page or
+	 * selection. Throws an error if the drawing is too large.
 	 */
 	EditorUi.prototype.downloadRequestBuilder = function(filename, format, ignoreSelection, base64,
 		transparent, currentPage, scale, border, grid, includeXml, pageRange, w, h, crop, margin,
@@ -3786,10 +3753,7 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 *
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Sets the current storage mode.
 	 */
 	EditorUi.prototype.setMode = function(mode, remember)
 	{
@@ -3797,10 +3761,8 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the diagram ID from the URL hash without the hash sign and any
+	 * parameters after a second hash sign.
 	 */
 	EditorUi.prototype.getDiagramId = function()
 	{
@@ -3827,10 +3789,8 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the object that is stored as JSON after the last hash sign in the
+	 * URL hash, or an empty object.
 	 */
 	EditorUi.prototype.getHashObject = function()
 	{
@@ -3878,10 +3838,9 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Stores the given object as JSON after the last hash sign in the URL hash,
+	 * or removes it if the object is empty. Does nothing if
+	 * Editor.enableHashObjects is false.
 	 */
 	EditorUi.prototype.setHashObject = function(obj)
 	{
@@ -4049,10 +4008,9 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Applies the updates in the given XML to the graph. An updates node can
+	 * change the values, styles, overlays and geometries of cells, replace the
+	 * model, set the view and fit the diagram.
 	 */
 	EditorUi.prototype.updateDiagram = function(xml)
 	{
@@ -4082,7 +4040,10 @@
 			{
 				var graph = this.editor.graph;
 				var model = graph.getModel();
-				model.beginUpdate();
+
+				// Reports the new styles and geometries like an arrange action
+				// (see Graph.beginArrange), eg. for the auto-routing
+				var arrange = graph.beginArrange();
 				var fit = null;
 
 				try
@@ -4281,7 +4242,7 @@
 				}
 				finally
 				{
-					model.endUpdate();
+					graph.endArrange(arrange);
 				}
 				
 				if (fit != null && this.chromelessResize)
@@ -4338,10 +4299,7 @@
 	};
 		
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Writes a debug message for the given file if it was discarded.
 	 */
 	EditorUi.prototype.logIfModified = function(file, discarded)
 	{
@@ -4385,10 +4343,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Closes the current file and opens the given file. If file is null, the
+	 * editor is cleared and the splash screen is shown unless noDialogs is true.
+	 * Returns true if the given file was loaded.
 	 */
 	EditorUi.prototype.fileLoaded = function(file, noDialogs, success)
 	{
@@ -4572,7 +4529,8 @@
 						theme += Editor.isDarkMode() ? '-dark' : '-light';
 					}
 
-					EditorUi.logEvent({category: file.getMode().toUpperCase() + '-OPEN-FILE-' + file.getHash(),
+					EditorUi.logEvent({category: file.getMode().toUpperCase() + '-OPEN-FILE-' +
+						EditorUi.getLogHash(file.getHash()),
 						action: 'size_' + file.getSize(), label: 'autosave_' +
 						((this.editor.autosave) ? 'on' : 'off') + '_theme_' + theme});
 				}
@@ -4964,10 +4922,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the XML of an mxlibrary node for the given images. Compressed
+	 * entries are uncompressed unless Editor.defaultCompressed is true.
 	 */
 	EditorUi.prototype.createLibraryDataFromImages = function(images)
 	{
@@ -4992,10 +4948,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Removes the given library from the sidebar and from the custom libraries
+	 * in the settings.
 	 */
 	EditorUi.prototype.closeLibrary = function(file)
 	{
@@ -5016,10 +4970,7 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Removes the palette of the library with the given ID from the sidebar.
 	 */
 	EditorUi.prototype.removeLibrarySidebar = function(id)
 	{
@@ -5073,10 +5024,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Adds the library in the given file to the sidebar. Throws an error if the
+	 * file is not a library.
 	 */
 	EditorUi.prototype.loadLibrary = function(file, expand)
 	{
@@ -5095,10 +5044,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the tooltip for the given library. This implementation returns an
+	 * empty string.
 	 */
 	EditorUi.prototype.getLibraryStorageHint = function(file)
 	{
@@ -5106,10 +5053,7 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Shows the sidebar window or the shapes panel.
 	 */
 	EditorUi.prototype.showSidebar = function()
 	{
@@ -5124,10 +5068,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Toggles the find window, or the find and replace window if findReplace is
+	 * true. If searchTerms is given, the window is shown and searches for the
+	 * terms.
 	 */
 	EditorUi.prototype.showSearchWindow = function(findReplace, searchTerms)
 	{
@@ -5181,10 +5124,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Adds the given library with the given images to the sidebar, replacing an
+	 * existing palette for the library, and adds it to the custom libraries in
+	 * the settings.
 	 */
 	EditorUi.prototype.libraryLoaded = function(file, images, optionalTitle, expand, defaultTags)
 	{
@@ -6591,10 +6533,10 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Shows the given error or response in an error dialog with the given title.
+	 * Offers a retry for errors with a retry function and changing the Google
+	 * Drive user for files that cannot be found or accessed. If there is no
+	 * error and no title, fn is invoked directly.
 	 */
 	EditorUi.prototype.handleError = function(resp, title, fn, invokeFnOnClose, notFoundMessage, fileHash, disableLogging)
 	{
@@ -6680,16 +6622,7 @@
 					{
 						id = (id.substring(0, 2) == '#U') ? id.substring(45, id.lastIndexOf('%26ex')) : id.substring(2);
 						
-						// Special case where the button must have a different label and function
-						this.showError(title, msg, mxResources.get('tryOpeningViaThisPage'), mxUtils.bind(this, function()
-						{
-							this.editor.graph.openLink('https://drive.google.com/open?id=' + id);
-
-							if (invokeFnOnClose != null)
-							{
-								invokeFnOnClose();
-							}
-						}), retry, mxResources.get('changeUser'), mxUtils.bind(this, function()
+						var changeUser = mxUtils.bind(this, function()
 						{
 							var driveUsers = this.drive.getUsersList();
 							var div = document.createElement('div');
@@ -6759,8 +6692,37 @@
 							{
 								this.loadFile(window.location.hash.substr(1), true);
 							}));
-							this.showDialog(dlg.container, 300, 100, true, true);
-						}), mxResources.get('cancel'), mxUtils.bind(this, function()
+							this.showDialog(dlg.container, 300, null, true, true);
+						});
+
+						// One click to pick the file and grant it, where the Home screen is on
+						if (this.isHomeEnabled != null && this.isHomeEnabled() &&
+							this.showDriveAccessDialog(id, changeUser, function()
+							{
+								if (fn != null)
+								{
+									fn();
+								}
+							}))
+						{
+							return;
+						}
+
+						// Special case where the button must have a different label and function
+						msg += '<br><br>' + mxUtils.htmlEntities(mxResources.get('openInGoogleDriveHint'), false);
+
+						this.showError(title, msg, mxResources.get('openInGoogleDrive'), mxUtils.bind(this, function()
+						{
+							// The file viewer shows Drive's own page for missing or inaccessible
+							// files, where /open?id= shows a generic 404 page
+							this.editor.graph.openLink('https://drive.google.com/file/d/' +
+								encodeURIComponent(id) + '/view');
+
+							if (invokeFnOnClose != null)
+							{
+								invokeFnOnClose();
+							}
+						}), retry, mxResources.get('changeUser'), changeUser, mxResources.get('cancel'), mxUtils.bind(this, function()
 						{
 							this.hideDialog();
 							
@@ -6768,7 +6730,7 @@
 							{
 								fn();
 							}
-						}), 520, 150);
+						}), 420);
 
 						return;
 					}
@@ -6847,10 +6809,7 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Shows the given message in a dialog with an OK button that invokes fn.
 	 */
 	EditorUi.prototype.alert = function(msg, fn, optionalWidth)
 	{
@@ -6860,12 +6819,9 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
-	 */
-	/**
+	 * Shows a confirmation dialog with the given message and button labels and
+	 * invokes okFn or cancelFn for the buttons.
+	 *
 	 * onClose runs for a dismissal that answered NEITHER button (eg.
 	 * Escape). Callers that leave state behind - a conflict flag, a
 	 * pending callback - must pass it, or a dismissed dialog strands
@@ -7061,10 +7017,7 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Sets the current file and its opened time.
 	 */
 	EditorUi.prototype.setCurrentFile = function(file)
 	{
@@ -7077,10 +7030,7 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the current file.
 	 */
 	EditorUi.prototype.getCurrentFile = function()
 	{
@@ -7129,146 +7079,134 @@
 	};
 
 	/**
-	 * Shows the animated GIF export dialog.
+	 * Shows the animation export dialog. Exports the flow animations as an
+	 * animated GIF and, if the page has a step animation, the step animation
+	 * as an animated GIF or MP4 video.
 	 */
 	EditorUi.prototype.showAnimatedGifExportDialog = function()
 	{
+		var pageAnimation = (typeof AnimationExport !== 'undefined') ?
+			AnimationExport.getAnimationData(this.editor.graph) : null;
+		var videoSupported = typeof Mp4Encoder !== 'undefined' &&
+			Mp4Encoder.isSupported();
+		var duration = (pageAnimation != null) ?
+			AnimationExport.getDuration(this, pageAnimation) : 0;
+
 		var div = document.createElement('div');
 		div.style.whiteSpace = 'nowrap';
 
 		var hd = document.createElement('h3');
-		mxUtils.write(hd, mxResources.get('formatAnimatedGif'));
+		mxUtils.write(hd, mxResources.get((pageAnimation != null) ?
+			'animation' : 'formatAnimatedGif'));
 		div.appendChild(hd);
 
 		// --- Settings section ---
 		var section = document.createElement('div');
 		section.className = 'geDialogSection';
 
-		// Speed (FPS)
-		var formRow = document.createElement('div');
-		formRow.className = 'geDialogFormRow';
-		var lbl = document.createElement('span');
-		lbl.className = 'geDialogFormLabel';
-		mxUtils.write(lbl, mxResources.get('speed') + ':');
-		formRow.appendChild(lbl);
-		var fpsSelect = document.createElement('select');
+		var addRow = function(label, elt)
+		{
+			var formRow = document.createElement('div');
+			formRow.className = 'geDialogFormRow';
+			var lbl = document.createElement('span');
+			lbl.className = 'geDialogFormLabel';
+			mxUtils.write(lbl, label + ':');
+			formRow.appendChild(lbl);
+			formRow.appendChild(elt);
+			section.appendChild(formRow);
 
-		var fpsOptions = [
+			return formRow;
+		};
+
+		var createSelect = function(options, value, defaultValue)
+		{
+			var select = document.createElement('select');
+
+			for (var i = 0; i < options.length; i++)
+			{
+				var opt = document.createElement('option');
+				mxUtils.write(opt, options[i].label);
+				opt.setAttribute('value', options[i].value);
+				select.appendChild(opt);
+			}
+
+			select.value = (value != null) ? value : defaultValue;
+
+			// Stored value may be an option that doesn't exist here
+			if (select.selectedIndex < 0)
+			{
+				select.value = defaultValue;
+			}
+
+			return select;
+		};
+
+		// Source is the step animation of the page or the flow animations
+		var sourceSelect = createSelect([
+			{label: mxResources.get('pageAnimation'), value: 'page'},
+			{label: mxResources.get('animations'), value: 'flow'}],
+			this.lastExportAnimationSource, 'page');
+		var sourceRow = addRow(mxResources.get('animation'), sourceSelect);
+
+		// Format of the page animation
+		var formatSelect = createSelect([
+			{label: mxResources.get('formatAnimatedGif'), value: 'gif'},
+			{label: mxResources.get('formatMp4'), value: 'mp4'}],
+			this.lastExportAnimationFormat, 'gif');
+		var formatRow = addRow(mxResources.get('format'), formatSelect);
+
+		// Speed (FPS)
+		var fpsSelect = createSelect([
 			{label: mxResources.get('slow'), value: 8},
 			{label: mxResources.get('medium'), value: 15},
-			{label: mxResources.get('fast'), value: 24}
-		];
-
-		for (var i = 0; i < fpsOptions.length; i++)
-		{
-			var opt = document.createElement('option');
-			mxUtils.write(opt, fpsOptions[i].label);
-			opt.setAttribute('value', fpsOptions[i].value);
-			fpsSelect.appendChild(opt);
-		}
-
-		fpsSelect.value = (this.lastExportFps != null) ? this.lastExportFps : 15;
-
-		if (fpsSelect.selectedIndex < 0)
-		{
-			fpsSelect.value = 15;
-		}
-
-		formRow.appendChild(fpsSelect);
-		section.appendChild(formRow);
+			{label: mxResources.get('fast'), value: 24}],
+			this.lastExportFps, 15);
+		addRow(mxResources.get('speed'), fpsSelect);
 
 		// Zoom
-		formRow = document.createElement('div');
-		formRow.className = 'geDialogFormRow';
-		lbl = document.createElement('span');
-		lbl.className = 'geDialogFormLabel';
-		mxUtils.write(lbl, mxResources.get('zoom') + ':');
-		formRow.appendChild(lbl);
 		var zoomInput = document.createElement('input');
 		zoomInput.setAttribute('type', 'text');
 		zoomInput.value = this.lastExportZoom || '100%';
-		formRow.appendChild(zoomInput);
-		section.appendChild(formRow);
+		var zoomRow = addRow(mxResources.get('zoom'), zoomInput);
 
 		// Border
-		formRow = document.createElement('div');
-		formRow.className = 'geDialogFormRow';
-		lbl = document.createElement('span');
-		lbl.className = 'geDialogFormLabel';
-		mxUtils.write(lbl, mxResources.get('borderWidth') + ':');
-		formRow.appendChild(lbl);
 		var borderInput = document.createElement('input');
 		borderInput.setAttribute('type', 'text');
 		borderInput.value = this.lastExportBorder || '0';
-		formRow.appendChild(borderInput);
-		section.appendChild(formRow);
+		var borderRow = addRow(mxResources.get('borderWidth'), borderInput);
 
-		// Loop
-		formRow = document.createElement('div');
-		formRow.className = 'geDialogFormRow';
-		lbl = document.createElement('span');
-		lbl.className = 'geDialogFormLabel';
-		mxUtils.write(lbl, mxResources.get('loops') + ':');
-		formRow.appendChild(lbl);
-		var loopSelect = document.createElement('select');
-
-		var loopOptions = [
+		// Loop (the page animation uses its own loop setting)
+		var loopSelect = createSelect([
 			{label: mxResources.get('forever'), value: 0},
 			{label: '1', value: 1},
 			{label: '3', value: 3},
-			{label: '5', value: 5}
-		];
-
-		for (var i = 0; i < loopOptions.length; i++)
-		{
-			var opt = document.createElement('option');
-			mxUtils.write(opt, loopOptions[i].label);
-			opt.setAttribute('value', loopOptions[i].value);
-			loopSelect.appendChild(opt);
-		}
-
-		loopSelect.value = (this.lastExportLoops != null) ? this.lastExportLoops : 0;
-
-		if (loopSelect.selectedIndex < 0)
-		{
-			loopSelect.value = 0;
-		}
-
-		formRow.appendChild(loopSelect);
-		section.appendChild(formRow);
+			{label: '5', value: 5}],
+			this.lastExportLoops, 0);
+		var loopRow = addRow(mxResources.get('loops'), loopSelect);
 
 		// Appearance selects the color scheme that light-dark() colors
 		// resolve to when the frames are rasterized [jgraph/drawio#5619]
-		formRow = document.createElement('div');
-		formRow.className = 'geDialogFormRow';
-		lbl = document.createElement('span');
-		lbl.className = 'geDialogFormLabel';
-		mxUtils.write(lbl, mxResources.get('appearance') + ':');
-		formRow.appendChild(lbl);
-		var themeSelect = document.createElement('select');
-
-		var lightOption = document.createElement('option');
-		lightOption.setAttribute('value', 'light');
-		mxUtils.write(lightOption, mxResources.get('light'));
-		themeSelect.appendChild(lightOption);
-
-		var darkOption = document.createElement('option');
-		darkOption.setAttribute('value', 'dark');
-		mxUtils.write(darkOption, mxResources.get('dark'));
-		themeSelect.appendChild(darkOption);
-
 		var defaultTheme = (Editor.isDarkMode()) ? 'dark' : 'light';
-		themeSelect.value = (this.lastExportTheme != null) ?
-			this.lastExportTheme : defaultTheme;
+		var themeSelect = createSelect([
+			{label: mxResources.get('light'), value: 'light'},
+			{label: mxResources.get('dark'), value: 'dark'}],
+			this.lastExportTheme, defaultTheme);
+		addRow(mxResources.get('appearance'), themeSelect);
 
-		// Stored override may be an option that doesn't exist here (eg. auto)
-		if (themeSelect.selectedIndex < 0)
-		{
-			themeSelect.value = defaultTheme;
-		}
-
-		formRow.appendChild(themeSelect);
-		section.appendChild(formRow);
+		// Length of the page animation and the GIF limit, aligned
+		// with the controls
+		var hintRow = document.createElement('div');
+		hintRow.className = 'geDialogFormRow geDialogFormRowTop';
+		var hintLabel = document.createElement('span');
+		hintLabel.className = 'geDialogFormLabel';
+		hintRow.appendChild(hintLabel);
+		var hint = document.createElement('span');
+		hint.className = 'geDialogHint';
+		hint.style.flex = '1';
+		hint.style.whiteSpace = 'normal';
+		hint.style.lineHeight = 'normal';
+		hintRow.appendChild(hint);
+		section.appendChild(hintRow);
 
 		div.appendChild(section);
 
@@ -7282,43 +7220,228 @@
 
 		div.appendChild(optSection);
 
-		var dlg = new CustomDialog(this, div, mxUtils.bind(this, function()
-		{
-			var zoomVal = parseInt(zoomInput.value);
+		var maxGif = (typeof AnimationExport !== 'undefined') ?
+			AnimationExport.maxGifDuration : 0;
 
-			if (isNaN(zoomVal) || zoomVal <= 0)
+		// GIF files of long animations are too large if MP4 is available
+		var isGifTooLong = function()
+		{
+			return videoSupported && duration > maxGif;
+		};
+
+		var isPage = function()
+		{
+			return pageAnimation != null && sourceSelect.value == 'page';
+		};
+
+		var dlg = null;
+
+		var update = function()
+		{
+			var page = isPage();
+			var tooLong = page && formatSelect.value == 'gif' && isGifTooLong();
+			sourceRow.style.display = (pageAnimation != null) ? '' : 'none';
+			formatRow.style.display = (page && videoSupported) ? '' : 'none';
+			zoomRow.style.display = (page) ? 'none' : '';
+			borderRow.style.display = (page) ? 'none' : '';
+			loopRow.style.display = (page) ? 'none' : '';
+			optSection.style.display = (page) ? 'none' : '';
+			hint.textContent = '';
+
+			if (page)
 			{
-				zoomVal = 100;
+				mxUtils.write(hint, mxResources.get('animationLength',
+					[Math.round(duration / 100) / 10]));
+
+				if (tooLong)
+				{
+					mxUtils.br(hint);
+					mxUtils.write(hint, mxResources.get('gifTooLong',
+						[Math.round(maxGif / 1000)]));
+				}
 			}
 
+			hintRow.style.display = (page) ? '' : 'none';
+
+			if (dlg != null)
+			{
+				dlg.okButton.disabled = tooLong;
+			}
+		};
+
+		// Suggests MP4 for animations that are too long for GIF
+		if (this.lastExportAnimationFormat == null && isGifTooLong())
+		{
+			formatSelect.value = 'mp4';
+		}
+
+		dlg = new CustomDialog(this, div, mxUtils.bind(this, function()
+		{
+			var page = isPage();
+			var format = (page && videoSupported) ? formatSelect.value : 'gif';
+
 			// Keeps manually changed settings for the session
-			this.lastExportZoom = zoomVal + '%';
-			this.lastExportBorder = borderInput.value;
 			this.lastExportFps = (parseInt(fpsSelect.value) != 15) ?
 				parseInt(fpsSelect.value) : null;
-			this.lastExportLoops = (parseInt(loopSelect.value) != 0) ?
-				parseInt(loopSelect.value) : null;
-			this.lastExportTransparent = (transparent.checked) ? true : null;
 			this.lastExportTheme = (themeSelect.value == defaultTheme) ?
 				null : themeSelect.value;
 
-			this.exportAnimatedGif({
-				fps: parseInt(fpsSelect.value),
-				scale: zoomVal / 100,
-				border: parseInt(borderInput.value) || 0,
-				repeat: parseInt(loopSelect.value),
-				transparent: transparent.checked,
-				theme: themeSelect.value,
-				background: transparent.checked ? null :
-					((this.editor.graph.background != null &&
-					  this.editor.graph.background != mxConstants.NONE) ?
-						this.editor.graph.background :
-						Editor.getDefaultPageBackgroundColor())
-			});
+			if (pageAnimation != null)
+			{
+				this.lastExportAnimationSource = (sourceSelect.value != 'page') ?
+					sourceSelect.value : null;
+			}
+
+			var background = (this.editor.graph.background != null &&
+				this.editor.graph.background != mxConstants.NONE) ?
+				this.editor.graph.background :
+				Editor.getDefaultPageBackgroundColor();
+
+			if (page)
+			{
+				if (videoSupported)
+				{
+					this.lastExportAnimationFormat = (format != 'gif') ? format : null;
+				}
+
+				this.exportPageAnimation({
+					format: format,
+					fps: parseInt(fpsSelect.value),
+					loop: format == 'gif' && pageAnimation.loop,
+					theme: themeSelect.value,
+					background: background
+				});
+			}
+			else
+			{
+				var zoomVal = parseInt(zoomInput.value);
+
+				if (isNaN(zoomVal) || zoomVal <= 0)
+				{
+					zoomVal = 100;
+				}
+
+				this.lastExportZoom = zoomVal + '%';
+				this.lastExportBorder = borderInput.value;
+				this.lastExportLoops = (parseInt(loopSelect.value) != 0) ?
+					parseInt(loopSelect.value) : null;
+				this.lastExportTransparent = (transparent.checked) ? true : null;
+
+				this.exportAnimatedGif({
+					fps: parseInt(fpsSelect.value),
+					scale: zoomVal / 100,
+					border: parseInt(borderInput.value) || 0,
+					repeat: parseInt(loopSelect.value),
+					transparent: transparent.checked,
+					theme: themeSelect.value,
+					background: transparent.checked ? null : background
+				});
+			}
 		}), null, mxResources.get('export'),
 			'https://www.drawio.com/doc/faq/export-diagram');
 
+		mxEvent.addListener(sourceSelect, 'change', update);
+		mxEvent.addListener(formatSelect, 'change', update);
+		update();
+
 		this.showDialog(dlg.container, 360, null, true, true, null, null, null, null, true);
+	};
+
+	/**
+	 * Exports the step animation of the current page as an animated GIF or
+	 * MP4 video (see AnimationExport). Shows the progress with a cancel
+	 * button.
+	 */
+	EditorUi.prototype.exportPageAnimation = function(options)
+	{
+		var exp = new AnimationExport(this, options);
+		var active = true;
+
+		var div = document.createElement('div');
+		div.style.paddingBottom = '10px';
+
+		var hd = document.createElement('h3');
+		mxUtils.write(hd, mxResources.get('exporting') + '...');
+		div.appendChild(hd);
+
+		var bar = document.createElement('progress');
+		bar.setAttribute('max', '100');
+		bar.setAttribute('value', '0');
+		bar.style.width = '100%';
+		div.appendChild(bar);
+
+		var btns = document.createElement('div');
+		btns.style.marginTop = '34px';
+		btns.style.textAlign = 'right';
+
+		var cancelBtn = mxUtils.button(mxResources.get('cancel'), mxUtils.bind(this, function()
+		{
+			this.hideDialog(true, null, div);
+		}));
+
+		cancelBtn.className = 'geBtn';
+		btns.appendChild(cancelBtn);
+		div.appendChild(btns);
+
+		// Every close path (Cancel, Escape) stops the export
+		this.showDialog(div, 320, null, true, false, function()
+		{
+			if (active)
+			{
+				active = false;
+				exp.cancel();
+			}
+		});
+
+		var done = mxUtils.bind(this, function()
+		{
+			var result = active;
+
+			if (active)
+			{
+				active = false;
+
+				// Closes only the progress dialog, never one on top of it
+				this.hideDialog(null, null, div);
+			}
+
+			return result;
+		});
+
+		exp.doExport(mxUtils.bind(this, function(blob)
+		{
+			if (done() && blob != null)
+			{
+				var ext = (options.format == 'mp4') ? 'mp4' : 'gif';
+				var reader = new FileReader();
+
+				// Routes the result through the standard save dialog
+				// (device/browser/cloud) like the other image exports
+				reader.onload = mxUtils.bind(this, function()
+				{
+					var uri = reader.result;
+					this.saveData(this.getBaseFilename() + '.' + ext, ext,
+						uri.substring(uri.lastIndexOf(',') + 1),
+						blob.type, true);
+				});
+
+				reader.onerror = mxUtils.bind(this, function(e)
+				{
+					this.handleError(e);
+				});
+
+				reader.readAsDataURL(blob);
+			}
+		}), mxUtils.bind(this, function(e)
+		{
+			if (done())
+			{
+				this.handleError(e);
+			}
+		}), function(value)
+		{
+			bar.setAttribute('value', Math.round(value * 100));
+		});
 	};
 
 	/**
@@ -7382,10 +7505,21 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Shows the exported data in the embed dialog with copy, download and
+	 * export buttons.
+	 */
+	EditorUi.prototype.showDataExport = function(data, filename)
+	{
+		var dlg = new EmbedDialog(this, data, null, null, null,
+			mxResources.get('export'), null, null, filename);
+		this.showDialog(dlg.container, 450, 270, true, true, null,
+			false, null, new mxRectangle(0, 0, 400, 250));
+		dlg.init();
+	};
+
+	/**
+	 * Shows the given text in a dialog with the given title and selects the
+	 * text.
 	 */
 	EditorUi.prototype.showTextDialog = function(title, text)
 	{
@@ -7397,10 +7531,8 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Saves the given data as a local file with the given name and MIME type.
+	 * XML files without a known extension get defaultExtension or drawio.
 	 */
 	EditorUi.prototype.doSaveLocalFile = function(data, filename, mimeType, base64Encoded, format, defaultExtension)
 	{
@@ -7490,10 +7622,8 @@
 	};
 		
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns a request that sends the given data to the save URL, which returns
+	 * it as a file with the given filename and MIME type.
 	 */
 	EditorUi.prototype.createEchoRequest = function(data, filename, mimeType, base64Encoded, format, base64Response)
 	{
@@ -7509,15 +7639,16 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Shows the save dialog for the given data and filename and saves the data
+	 * as a download, in a new window or in the chosen storage. The browser
+	 * storage is only offered if allowBrowser is true.
 	 */
 	EditorUi.prototype.saveLocalFile = function(data, filename, mimeType, base64Encoded, format, allowBrowser, allowTab, defaultExtension, defaultMode)
 	{
 		allowBrowser = (allowBrowser != null) ? allowBrowser : false;
-		allowTab = (allowTab != null) ? allowTab : (format != 'vsdx') && (!mxClient.IS_IOS || !navigator.standalone);
+		// Binary files other than images cannot be shown in a new window
+		allowTab = (allowTab != null) ? allowTab : (format != 'vsdx') && (format != 'mp4') &&
+			(!mxClient.IS_IOS || !navigator.standalone);
 
 		var saveFunction = mxUtils.bind(this, function(newTitle, mode, input, folderId)
 		{
@@ -7641,7 +7772,8 @@
 	};
 
 	/**
-	 * Creates a temporary graph instance for rendering off-screen content.
+	 * Adds the tags and export buttons to the toolbar of the chromeless viewer
+	 * and applies the hidden tags from the tags URL parameter.
 	 */
 	EditorUi.prototype.addChromelessToolbarItems = function(addButton)
 	{
@@ -7678,8 +7810,10 @@
 				{
 					var id = (this.currentPage != null) ?
 						this.currentPage.getId() : 0;
-					var tags = tagsParam[id];
-					graph.hiddenTags = (tags != null && tags.length > 0) ? tags : [];
+					// Own properties only as page IDs come from the diagram (eg. "constructor")
+					var tags = (Object.prototype.hasOwnProperty.call(tagsParam, id)) ?
+						tagsParam[id] : null;
+					graph.hiddenTags = (Array.isArray(tags) && tags.length > 0) ? tags : [];
 					graph.refresh();
 				});
 
@@ -7959,10 +8093,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Saves the given data with the given filename and format via
+	 * saveLocalFile or an echo request. In embed mode with the JSON protocol,
+	 * the data is sent to the parent window instead.
 	 */
 	EditorUi.prototype.saveData = function(filename, format, data, mime, base64Encoded, defaultMode)
 	{
@@ -7993,13 +8126,12 @@
 	};
 	
 	/**
-	 * Translates this point by the given vector.
-	 * 
+	 * Shows the save dialog for the given filename and saves the response of the
+	 * request that fn creates for the chosen name, either as a download or in
+	 * the chosen storage.
+	 *
 	 * Last 3 argument are optional and must only be used if the data can be stored as is on the client
 	 * side without requiring a server roundtrip.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
 	 */
 	EditorUi.prototype.saveRequest = function(filename, format, fn, data, base64Encoded, mimeType, allowTab)
 	{
@@ -8163,22 +8295,25 @@
 	 * runs where the SVG is the document, eg. opened in a browser tab or via
 	 * an object tag, not when the SVG is shown with an img tag.
 	 *
-	 * That guarantee only covers the attributes createSvgImageExport writes on
-	 * its own icon wrappers. Labels are copied into the export as markup, so any
-	 * other element carrying the attribute came from the diagram and its value
-	 * was never sanitized for this use. Those are dropped here before the script
-	 * is added, so only the wrappers this export created are ever bound.
+	 * That guarantee only covers the given wrappers, which createSvgImageExport
+	 * created (see iconWrappers of its result). Labels are copied into the
+	 * export as markup and plugins may copy cell attributes into data
+	 * attributes (eg. svgdata writes an attribute named icon-content as
+	 * data-icon-content on its own g elements), so any other element carrying
+	 * the attributes came from the diagram and its value was never sanitized
+	 * for this use. Those are dropped here before the script is added, so only
+	 * the wrappers this export created are ever bound.
 	 */
-	EditorUi.prototype.addSvgIconHandlers = function(svgRoot)
+	EditorUi.prototype.addSvgIconHandlers = function(svgRoot, wrappers)
 	{
-		var candidates = svgRoot.querySelectorAll('[data-icon-content]');
+		var trusted = new Set(wrappers);
+		var candidates = svgRoot.querySelectorAll('[data-icon], [data-icon-content]');
 
 		for (var i = 0; i < candidates.length; i++)
 		{
-			// The wrappers are SVG g elements that also carry the icon type
-			if (candidates[i].nodeName != 'g' ||
-				!candidates[i].hasAttribute('data-icon'))
+			if (!trusted.has(candidates[i]))
 			{
+				candidates[i].removeAttribute('data-icon');
 				candidates[i].removeAttribute('data-icon-content');
 			}
 		}
@@ -8360,8 +8495,8 @@
 					border = Math.max((border != null) ? border : 0, Math.ceil(16 * scale));
 				}
 
-				var imgExport = this.editor.graph.createSvgImageExport(editable, addSvgData,
-					icons, (linkTarget == 'self') ? '_top' : '_blank');
+				var imgExport = this.editor.graph.createSvgImageExport(addSvgData, icons,
+					(linkTarget == 'self') ? '_top' : '_blank');
 				var tempFontLookup = Object.create(null);
 
 				// Restricts font embedding to fonts used in rendered cells
@@ -8385,7 +8520,7 @@
 
 				if (icons)
 				{
-					this.addSvgIconHandlers(svgRoot);
+					this.addSvgIconHandlers(svgRoot, imgExport.iconWrappers);
 				}
 
 				var filename = this.getBaseFilename() + ((editable) ? '.drawio' : '') + '.svg';
@@ -11054,10 +11189,8 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the time since the given date as a localized string, or null if
+	 * it is less than a minute.
 	 */
 	EditorUi.prototype.timeSince = function(date)
 	{
@@ -11103,6 +11236,64 @@
 	    }
 	    
 	    return null;
+	};
+
+	/**
+	 * Returns the locale for dates and times. This is the default locale of the
+	 * browser, which has the regional formats (eg. 24-hour clock in en-GB), or
+	 * the UI language if that is a different language.
+	 */
+	EditorUi.prototype.getDateLocale = function()
+	{
+		try
+		{
+			if (mxLanguage != null && Intl.DateTimeFormat.supportedLocalesOf(mxLanguage).length > 0)
+			{
+				var locale = new Intl.DateTimeFormat().resolvedOptions().locale;
+
+				if (mxLanguage.split('-')[0].toLowerCase() != locale.split('-')[0])
+				{
+					return mxLanguage;
+				}
+			}
+		}
+		catch (e)
+		{
+			// Uses default locale
+		}
+
+		return undefined;
+	};
+
+	/**
+	 * Returns the given date with the month name, eg. 19 Aug 2025, 17:42:04.
+	 * If short is true then the date is omitted for today and the year is
+	 * omitted for dates in the current year.
+	 */
+	EditorUi.prototype.formatDateTime = function(date, short)
+	{
+		var now = new Date();
+		var opts = {hour: 'numeric', minute: 'numeric', second: 'numeric'};
+
+		if (!short || date.toDateString() != now.toDateString())
+		{
+			opts.day = 'numeric';
+			opts.month = 'short';
+
+			if (!short || date.getFullYear() != now.getFullYear())
+			{
+				opts.year = 'numeric';
+			}
+		}
+
+		try
+		{
+			return date.toLocaleString(this.getDateLocale(), opts);
+		}
+		catch (e)
+		{
+			return date.toLocaleString();
+		}
 	};
 
 	/**
@@ -11388,9 +11579,7 @@
 			bg = '#ffffff';
 		}
 
-		// Sets or disables alternate text for foreignObjects. Disabling is needed
-		// because PhantomJS seems to ignore switch statements and paint all text.
-		var imgExport = this.editor.graph.createSvgImageExport(xml != null, addSvgData);
+		var imgExport = this.editor.graph.createSvgImageExport(addSvgData);
 		var tempFontLookup = Object.create(null);
 
 		// Restricts font embedding to fonts used in rendered cells
@@ -11933,7 +12122,7 @@
 							{
 								action.open = 'data:page/id,' + newId;
 							}
-							else if (this.getPageById(oldId) == null)
+							else if (this.getPageByLink(action.open) == null)
 							{
 								delete action.open;
 							}
@@ -11953,14 +12142,70 @@
 	};
 	
 	/**
-	 * Returns true for VSD, VDX and VSS, VSX files.
+	 * Returns true for VSD, VDX, VST and VSS, VSX files.
 	 */
 	EditorUi.prototype.isRemoteVisioFormat = function(filename)
 	{
-		return (/(\.v(sd|dx))($|\?)/i.test(filename) ||
+		return (/(\.v(sd|dx|st))($|\?)/i.test(filename) ||
 			/(\.vs(s|x))($|\?)/i.test(filename));
 	};
-	
+
+	/**
+	 * Converts a binary Visio file (.vsd, .vss, .vst of any Visio version)
+	 * to Visio XML in the browser using drawio-vsd (window.DrawioVsd). Calls
+	 * success with a Blob of the .vsdx, .vssx or .vstx package and its
+	 * file name, or fallback if the converter is not loaded, the data is not
+	 * a binary Visio file (e.g. .vdx) or the conversion fails.
+	 */
+	EditorUi.prototype.convertBinaryVisio = function(file, filename, success, fallback)
+	{
+		if (typeof DrawioVsd === 'undefined' || typeof FileReader === 'undefined')
+		{
+			fallback();
+		}
+		else
+		{
+			var reader = new FileReader();
+
+			reader.onload = mxUtils.bind(this, function()
+			{
+				var result = null;
+
+				try
+				{
+					var bytes = new Uint8Array(reader.result);
+
+					if (DrawioVsd.isBinaryVisio(bytes))
+					{
+						result = DrawioVsd.convert(bytes, {filename: filename});
+					}
+				}
+				catch (e)
+				{
+					// Malformed or unsupported: the conversion service may still read it
+					result = null;
+				}
+
+				if (result != null)
+				{
+					var name = String(filename || 'drawing').replace(/\.[^.\/\\]*$/, '') + '.' + result.type;
+					success(new Blob([result.bytes()]), name);
+				}
+				else
+				{
+					fallback();
+				}
+			});
+
+			reader.onerror = function()
+			{
+				fallback();
+			};
+
+			reader.readAsArrayBuffer(file);
+		}
+	};
+
 	/**
 	 * Imports the given Visio file
 	 */
@@ -12029,7 +12274,10 @@
 						// ignore
 					}
 					
-					if (remote) 
+					// Binary Visio files (.vsd, .vss, .vst) are converted in the browser
+					// (drawio-vsd); the conversion service remains the fallback for other
+					// formats (.vdx) and for files the converter cannot read
+					var remoteImport = mxUtils.bind(this, function()
 					{
 						if (VSS_CONVERT_URL != null && !this.isOffline())
 						{
@@ -12140,6 +12388,24 @@
 									mxResources.get('serviceUnavailableOrBlocked')});
 							}
 						}
+					});
+
+					if (remote)
+					{
+						this.convertBinaryVisio(file, filename, mxUtils.bind(this, function(blob, name)
+						{
+							if (timeout.clear())
+							{
+								try
+								{
+									this.doImportVisio(blob, done, handleError, name);
+								}
+								catch (e)
+								{
+									handleError(e);
+								}
+							}
+						}), remoteImport);
 					}
 					else if (timeout.clear())
 					{
@@ -17399,8 +17665,7 @@
 		{
 			if (Graph.isPageLink(link) && editorUi.pages != null)
 			{
-				var id = link.substring(link.indexOf(',') + 1);
-				var page = editorUi.getPageById(id);
+				var page = editorUi.getPageByLink(link);
 
 				if (page != null)
 				{
@@ -18705,59 +18970,6 @@
 			this.refresh();
 		}
 
-		// Adds an element to edit the style in the footer in test mode
-		if (urlParams['styledev'] == '1')
-		{
-			var footer = document.getElementById('geFooter');
-
-			if (footer != null)
-			{
-				this.styleInput = document.createElement('input');
-				this.styleInput.setAttribute('type', 'text');
-				this.styleInput.style.position = 'absolute';
-				this.styleInput.style.top = '14px';
-				this.styleInput.style.left = '2px';
-				// Workaround for ignore right CSS property in FF
-				this.styleInput.style.width = '98%';
-				this.styleInput.style.visibility = 'hidden';
-				this.styleInput.style.opacity = '0.9';
-
-				mxEvent.addListener(this.styleInput, 'change', mxUtils.bind(this, function()
-				{
-					this.editor.graph.getModel().setStyle(this.editor.graph.getSelectionCell(), this.styleInput.value);
-				}));
-
-				footer.appendChild(this.styleInput);
-
-				this.editor.graph.getSelectionModel().addListener(mxEvent.CHANGE, mxUtils.bind(this, function(sender, evt)
-				{
-					if (this.editor.graph.getSelectionCount() > 0)
-					{
-						var cell = this.editor.graph.getSelectionCell();
-						var style = this.editor.graph.getModel().getStyle(cell);
-
-						this.styleInput.value = style || '';
-						this.styleInput.style.visibility = 'visible';
-					}
-					else
-					{
-						this.styleInput.style.visibility = 'hidden';
-					}
-				}));
-			}
-
-			var isSelectionAllowed = this.isSelectionAllowed;
-			this.isSelectionAllowed = function(evt)
-			{
-				if (mxEvent.getSource(evt) == this.styleInput)
-				{
-					return true;
-				}
-
-				return isSelectionAllowed.apply(this, arguments);
-			};
-		}
-
 		// Removes info text in page
 		var info = document.getElementById('geInfo');
 
@@ -19479,7 +19691,8 @@
 		this.clipboardElt = textInput;
 
 		var restoreFocus = false;
-		
+		var restoreOnInsertUp = false;
+
 		// Disables built-in cut, copy and paste shortcuts
 		this.keyHandler.bindControlKey(88, null);
 		this.keyHandler.bindControlKey(67, null);
@@ -19496,9 +19709,22 @@
 				(source.nodeName != 'TEXTAREA' || source === this.typingShim) &&
 				source.contentEditable != 'true')
 			{
+				// Shift+Insert is the legacy paste shortcut on Windows and Linux. Unlike
+				// Ctrl, Shift alone does not show the textarea, so it is shown here on
+				// the Insert keydown before the native paste runs and removed on keyup.
+				// (Ctrl+Insert for copy is handled via the Control keydown below.)
+				var shiftInsert = !mxClient.IS_MAC && evt.keyCode == 45 /* Insert */ &&
+					mxEvent.isShiftDown(evt) && !mxEvent.isControlDown(evt) &&
+					!mxEvent.isAltDown(evt) && !mxEvent.isMetaDown(evt);
+
 				if (evt.keyCode == 224 /* FF */ || (!mxClient.IS_MAC && evt.keyCode == 17 /* Control */) ||
-					(mxClient.IS_MAC && (evt.keyCode == 91 || evt.keyCode == 93) /* Left/Right Meta */))
+					(mxClient.IS_MAC && (evt.keyCode == 91 || evt.keyCode == 93) /* Left/Right Meta */) ||
+					shiftInsert)
 				{
+					// Insert keyup removes the textarea only if Shift+Insert showed it,
+					// Ctrl/Meta keydown leaves it to the Ctrl/Meta keyup
+					restoreOnInsertUp = shiftInsert && !restoreFocus;
+
 					// Cannot use parentNode for check in IE
 					if (!restoreFocus)
 					{
@@ -19561,9 +19787,11 @@
 			window.setTimeout(mxUtils.bind(this, function()
 			{
 				if (restoreFocus && (keyCode == 224 /* FF */ || keyCode == 17 /* Control */ ||
-					keyCode == 91 /* MetaLeft */ || keyCode == 93 /* MetaRight */))
+					keyCode == 91 /* MetaLeft */ || keyCode == 93 /* MetaRight */ ||
+					(restoreOnInsertUp && keyCode == 45 /* Insert */)))
 				{
 					restoreFocus = false;
+					restoreOnInsertUp = false;
 
 					// Remove textInput first so the typing shim's
 					// clipboardElt check sees it as no longer present
@@ -22210,7 +22438,7 @@
 	
 			if (comma > 0)
 			{
-				var page = this.getPageById(href.substring(comma + 1));
+				var page = this.getPageByLink(href);
 	
 				if (page != null)
 				{
@@ -22231,64 +22459,12 @@
 	};
 
 	/**
-	 * 
+	 * Delegates to Graph.getCustomLinkTitle so the viewer, which has no
+	 * EditorUi, resolves the same label.
 	 */
 	EditorUi.prototype.getCustomLinkTitle = function(href)
 	{
-		var result = mxResources.get('action');
-
-		if (href.substring(0, 17) == 'data:action/json,')
-		{
-			try
-			{
-				var link = JSON.parse(href.substring(17));
-
-				// Mirrors LinkDialog.updateActionSummary so the link
-				// hint, link-icon tooltip, and Edit Link dialog all
-				// agree on the visible label. Resolution order:
-				//   1. User-supplied `title` on the custom action.
-				//   2. "Effects (N)" for animation-wrapper payloads.
-				//   3. Localized label of the first action key via
-				//      `CustomActionDialog.SCHEMAS[key]`.
-				//   4. Fallback to the generic "Action" string.
-				if (link != null &&
-					typeof link.title == 'string' &&
-					link.title.trim() != '')
-				{
-					result = link.title.trim();
-				}
-				else if (link != null && Array.isArray(link.actions) &&
-					link.actions.length > 0)
-				{
-					var first = Object.keys(link.actions[0])[0] || '';
-
-					if (first == 'animation' &&
-						link.actions[0].animation != null &&
-						Array.isArray(link.actions[0].animation.steps))
-					{
-						var sc = link.actions[0].animation.steps.length;
-						result = mxResources.get('effects') + ' (' + sc + ')';
-					}
-					else if (first != '')
-					{
-						var schema = (typeof CustomActionDialog !=
-							'undefined' && CustomActionDialog != null) ?
-							CustomActionDialog.SCHEMAS[first] : null;
-						var fallback = (schema != null) ?
-							schema.label : first;
-						var resKey = (schema != null && schema.labelKey) ?
-							schema.labelKey : first;
-						result = mxResources.get(resKey, null, fallback);
-					}
-				}
-			}
-			catch (e)
-			{
-				// ignore
-			}
-		}
-
-		return result;
+		return Graph.prototype.getCustomLinkTitle.apply(this, arguments);
 	};
 
 	/**
@@ -22298,8 +22474,7 @@
 	{
 		if (Graph.isPageLink(href))
 		{
-			var comma = href.indexOf(',');
-			var page = this.getPageById(href.substring(comma + 1));
+			var page = this.getPageByLink(href);
 			
 			if (page)
 			{
@@ -24200,6 +24375,51 @@
 	};
 
 	/**
+	 * Highlights the given element while something is dragged over it and
+	 * passes drop events to the given function. Drag events stop there.
+	 */
+	EditorUi.prototype.addDropHandler = function(elt, fn)
+	{
+		var dropElt = null;
+
+		mxEvent.addListener(elt, 'dragleave', function(evt)
+		{
+			if (dropElt != null)
+			{
+				dropElt.parentNode.removeChild(dropElt);
+				dropElt = null;
+			}
+
+			evt.stopPropagation();
+			evt.preventDefault();
+		});
+
+		mxEvent.addListener(elt, 'dragover', mxUtils.bind(this, function(evt)
+		{
+			if (dropElt == null)
+			{
+				dropElt = this.highlightElement(elt);
+			}
+
+			evt.stopPropagation();
+			evt.preventDefault();
+		}));
+
+		mxEvent.addListener(elt, 'drop', function(evt)
+		{
+			if (dropElt != null)
+			{
+				dropElt.parentNode.removeChild(dropElt);
+				dropElt = null;
+			}
+
+			fn(evt);
+			evt.stopPropagation();
+			evt.preventDefault();
+		});
+	};
+
+	/**
 	 * Adds a file drop handler for opening local files.
 	 */
 	EditorUi.prototype.addFileDropHandler = function(elts)
@@ -25947,6 +26167,9 @@
 		var autosave = false;
 		var lastData = null;
 		var embedShadowPages = null;
+		var zoomListener = null;
+		var zoomEvents = false;
+		var lastScale = null;
 
 		// Serializes the current diagram for the host. Defined outside the
 		// message handler because the merge, patch and getDiff actions call
@@ -25993,6 +26216,7 @@
 			var data = evt.data;
 			var afterLoad = null;
 			var pendingLayout = null;
+			var pendingZoomEvents = false;
 
 			var extractDiagramXml = mxUtils.bind(this, function(data)
 			{
@@ -26713,7 +26937,7 @@
 										{
 											this.editor.graph.setEnabled(false);
 											var imgExport = this.editor.graph.createSvgImageExport(
-												false, (data.embedCellMetadata) ? true : false);
+												(data.embedCellMetadata) ? true : false);
 											var tempFontLookup = Object.create(null);
 
 											// Restricts font embedding to fonts used in rendered cells
@@ -26793,6 +27017,11 @@
 						this.embedDiffSyncPatchOnly = (typeof data.diffSync === 'object' &&
 							data.diffSync != null && data.diffSync.patchOnly == true);
 						this.embedExportProtocol = data.exportProtocol == true;
+						// Zoom events are off while loading and turned on with
+						// the baseline scale in afterModel, so the initial view
+						// (including scale, fit and viewbox) is not reported
+						zoomEvents = false;
+						pendingZoomEvents = data.zoomEvents == true;
 						var sourceMetadata = data.sourceMetadata || null;
 						// layout: run the requested layout once the diagram is
 						// loaded (a preset name or custom-layout JSON, the same
@@ -27435,6 +27664,32 @@
 						afterLoad();
 					}
 
+					// zoomEvents (load option): sends a zoom message with the
+					// same fields as the load response whenever the scale
+					// changes after the load (mouse wheel, pinch, keyboard or
+					// actions) so the host can keep its zoom controls in sync
+					lastScale = this.editor.graph.view.scale;
+					zoomEvents = pendingZoomEvents;
+
+					if (zoomEvents && zoomListener == null)
+					{
+						zoomListener = mxUtils.bind(this, function()
+						{
+							var scale = this.editor.graph.view.scale;
+
+							if (zoomEvents && scale != lastScale)
+							{
+								lastScale = scale;
+								var msg = this.createLoadMessage('zoom');
+								var parent = this.embedMessageSource || window.opener || window.parent;
+								parent.postMessage(JSON.stringify(msg), '*');
+							}
+						});
+
+						this.editor.graph.view.addListener(mxEvent.SCALE, zoomListener);
+						this.editor.graph.view.addListener(mxEvent.SCALE_AND_TRANSLATE, zoomListener);
+					}
+
 					// Sends the bounds of the graph to the host after parsing
 					if (urlParams['returnbounds'] == '1' || urlParams['proto'] == 'json')
 					{
@@ -27598,25 +27853,29 @@
 	};
 
 	/**
-	 * Adds the buttons for embedded mode.
+	 * Sets the filename for embedded mode. Replaces an existing filename in
+	 * place so that it keeps its position relative to the embed buttons.
 	 */
 	EditorUi.prototype.setEmbedTitle = function(filename)
 	{
 		var tmp = this.createStatusDiv(filename);
 
-		if (this.embedFilenameSpan != null)
+		if (this.embedFilenameSpan != null &&
+			this.embedFilenameSpan.parentNode != null)
 		{
-			this.embedFilenameSpan.parentNode.removeChild(this.embedFilenameSpan);
+			this.embedFilenameSpan.parentNode.replaceChild(
+				tmp, this.embedFilenameSpan);
 		}
-
-		if (Editor.currentTheme == 'kennedy' ||
+		else if (Editor.currentTheme == 'kennedy' ||
 			Editor.currentTheme == 'atlas')
 		{
 			this.menubarContainer.appendChild(tmp);
 		}
 		else
 		{
-			this.buttonContainer.appendChild(tmp);
+			// Filename goes before the buttons as in addEmbedButtons
+			this.buttonContainer.insertBefore(tmp,
+				this.buttonContainer.firstChild);
 		}
 
 		this.embedFilenameSpan = tmp;
@@ -28512,7 +28771,17 @@
 
 						if (cell != null && !ignoreCell)
 						{
-							graph.model.setStyle(cell, newCell.style);
+							// Reports the new style of the updated cell like an
+							// arrange action (see Graph.beginArrange)
+							var arrange = graph.beginArrange();
+							try
+							{
+								graph.model.setStyle(cell, newCell.style);
+							}
+							finally
+							{
+								graph.endArrange(arrange);
+							}
 
 							if (mxUtils.indexOf(cells, cell) < 0)
 							{
@@ -29104,10 +29373,9 @@
 	};
 
 	/**
-	 * Translates this point by the given vector.
-	 * 
-	 * @param {number} dx X-coordinate of the translation.
-	 * @param {number} dy Y-coordinate of the translation.
+	 * Returns the search part of the current URL without the given URL
+	 * parameters. The search is returned unchanged if exclude is null or in
+	 * offline or demo mode.
 	 */
 	EditorUi.prototype.getSearch = function(exclude)
 	{
@@ -29180,9 +29448,9 @@
 	/**
 	 * Overrides link dialog.
 	 */
-	EditorUi.prototype.showLinkDialog = function(value, btnLabel, fn, showNewWindowOption, linkTarget)
+	EditorUi.prototype.showLinkDialog = function(value, btnLabel, fn, showNewWindowOption, linkTarget, mixed)
 	{
-		var dlg = new LinkDialog(this, value, btnLabel, fn, true, showNewWindowOption, linkTarget);
+		var dlg = new LinkDialog(this, value, btnLabel, fn, true, showNewWindowOption, linkTarget, mixed);
 		this.showDialog(dlg.container, 440, null, true, true);
 		dlg.init();
 	};
@@ -32616,8 +32884,7 @@ var CommentsWindow = function(editorUi, x, y, w, h, saveCallback)
 		}
 		
 		mxUtils.write(dateDiv, mxResources.get('timeAgo', [str], '{1} ago'));
-		dateDiv.setAttribute('title', ts.toLocaleDateString() + ' ' +
-				ts.toLocaleTimeString());
+		dateDiv.setAttribute('title', editorUi.formatDateTime(ts));
 	};
 	
 	function showBusy(commentDiv)

@@ -700,6 +700,19 @@
 		{
 			editorUi.pickFile();
 		});
+
+		// Not 'home', which is Navigation > Home (graph.home). Disabled where
+		// Home is off, which also hides it from the action search.
+		editorUi.actions.addAction('myDiagrams...', function()
+		{
+			if (editorUi.showHome != null)
+			{
+				editorUi.showHome();
+			}
+		}).isEnabled = function()
+		{
+			return editorUi.isHomeEnabled != null && editorUi.isHomeEnabled();
+		};
 		
 		editorUi.actions.addAction('close', function()
 		{
@@ -808,16 +821,46 @@
 			}
 		}, null, null, null, navigator.onLine && urlParams['stealth'] != '1' && urlParams['lockdown'] != '1');
 
-		if (typeof(MathJax) !== 'undefined')
+		if (typeof(DrawioMathJax) !== 'undefined')
 		{
 			var action = editorUi.actions.addAction('mathematicalTypesetting', function()
 			{
-				var change = new ChangePageSetup(editorUi);
-				change.ignoreColor = true;
-				change.ignoreImage = true;
-				change.mathEnabled = !editorUi.isMathEnabled();
-				
-				graph.model.execute(change);
+				var enabled = !editorUi.isMathEnabled();
+
+				var apply = function()
+				{
+					// Ignores a repeated click while the bundle was loading
+					if (editorUi.isMathEnabled() != enabled)
+					{
+						graph.model.beginUpdate();
+						try
+						{
+							var change = new ChangePageSetup(editorUi);
+							change.ignoreColor = true;
+							change.ignoreImage = true;
+							change.mathEnabled = enabled;
+							graph.model.execute(change);
+
+							// Autosize cells take the size of the math or its source
+							graph.updateMathCellSizes();
+						}
+						finally
+						{
+							graph.model.endUpdate();
+						}
+					}
+				};
+
+				// Measuring the typeset math needs the bundle, which is only
+				// loaded when math is first typeset
+				if (enabled && Editor.mathOutputSize && typeof Editor.loadMath === 'function')
+				{
+					Editor.loadMath(apply);
+				}
+				else
+				{
+					apply();
+				}
 			});
 			
 			action.setToggleAction(true);
@@ -923,6 +966,51 @@
 			}
 		}, null, null, Editor.ctrlKey + '+' + Editor.shiftKey + '+M');
 		
+		// Edits the points of a polygon or the connection points of a shape in
+		// the draw.io dialogs. Unlike isGraphEnabled, these actions also check
+		// their own enabled state, which is updated for the selection.
+		var isActionAndGraphEnabled = function()
+		{
+			return Action.prototype.isEnabled.apply(this, arguments) && graph.isEnabled();
+		};
+
+		editorUi.actions.addAction('editPolygon...', function()
+		{
+			var cell = graph.getSelectionCell();
+
+			if (graph.isEnabled() && cell != null)
+			{
+				var state = graph.view.getState(cell);
+
+				if (state != null && mxUtils.getValue(state.style,
+					mxConstants.STYLE_SHAPE) === 'mxgraph.basic.polygon')
+				{
+					var dlg = new PolygonDialog(editorUi, cell);
+					editorUi.showDialog(dlg.container, 680, 540, true, true,
+						function() { dlg.destroy(); },
+						null, null, new mxRectangle(0, 0, 740, 600));
+					dlg.init();
+				}
+			}
+		}).isEnabled = isActionAndGraphEnabled;
+
+		editorUi.actions.addAction('editConnectionPoints...', function()
+		{
+			var cell = graph.getSelectionCell();
+
+			if (graph.isEnabled() && !graph.isCellLocked(graph.getDefaultParent()) &&
+				cell != null && cell.geometry != null)
+			{
+				var dlg = new ConnectionPointsDialog(editorUi, cell);
+				editorUi.showDialog(dlg.container, 400, 450, true, false, function()
+				{
+					dlg.destroy();
+				}, null, null, new mxRectangle(0, 0, 400 + 50, 450 + 50),
+					null, 'editConnectionPoints');
+				dlg.init();
+			}
+		}, null, null,  Editor.altKey + '+' + Editor.shiftKey + '+Q').isEnabled = isActionAndGraphEnabled;
+		
 		editorUi.actions.addAction('copyStyle', function()
 		{
 			if (graph.isEnabled() && graph.getSelectionCount() == 1)
@@ -948,8 +1036,18 @@
 		{
 			if (graph.isEnabled() && !graph.isSelectionEmpty() && editorUi.copiedStyle != null)
 			{
-				graph.pasteCellStyles(graph.includeDescendantParts(graph.getSelectionCells()),
-					editorUi.copiedStyle, editorUi.copiedStyle, true);
+				// Reports the new styles like Edit Style (see Graph.beginArrange),
+				// eg. a pasted libavoidRouting flag routes the edges
+				var arrange = graph.beginArrange();
+				try
+				{
+					graph.pasteCellStyles(graph.includeDescendantParts(graph.getSelectionCells()),
+						editorUi.copiedStyle, editorUi.copiedStyle, true);
+				}
+				finally
+				{
+					graph.endArrange(arrange);
+				}
 			}
 		}, null, null,  Editor.altKey + '+V');
 
@@ -1065,7 +1163,8 @@
 			exportImage('webp');
 		}));
 
-		editorUi.actions.put('exportAnimatedGif', new Action(mxResources.get('formatAnimatedGif') + '...', function()
+		// Exports flow animations as GIF and page animations as GIF or MP4
+		editorUi.actions.put('exportAnimatedGif', new Action(mxResources.get('animation') + '...', function()
 		{
 			editorUi.showAnimatedGifExportDialog();
 		}));
@@ -1136,8 +1235,31 @@
 
 		editorUi.actions.addAction('keyboardShortcuts...', function()
 		{
-			if (!mxClient.IS_CHROMEAPP &&
-				!EditorUi.isElectronApp &&
+			// Desktop app cannot open local files in a window, so the bundled
+			// shortcuts.svg is shown in a dialog which also works offline
+			if (EditorUi.isElectronApp)
+			{
+				var ratio = 1069 / 1427;
+				var w = Math.max(200, Math.min(1427, window.innerWidth - 120));
+				var h = Math.round(w * ratio);
+				var maxH = Math.max(150, window.innerHeight - 120);
+
+				if (h > maxH)
+				{
+					h = maxH;
+					w = Math.round(h / ratio);
+				}
+
+				var img = document.createElement('img');
+				img.setAttribute('src', 'shortcuts.svg');
+				img.setAttribute('alt', mxResources.get('keyboardShortcuts'));
+				img.style.display = 'block';
+				img.style.width = w + 'px';
+				img.style.height = h + 'px';
+
+				editorUi.showDialog(img, w, h, true, true, null, true);
+			}
+			else if (!mxClient.IS_CHROMEAPP &&
 				!navigator.standalone)
 			{
 				editorUi.openLink('shortcuts.svg');
@@ -3957,7 +4079,7 @@
 				}
 
 				ui.chromelessResize(false);
-			}, Editor.zoomFitImage, mxResources.get('smartFit'));
+			}, Editor.zoomFitImage, mxResources.get('fit'));
 
 			addToolbarButton(function()
 			{
@@ -5341,7 +5463,7 @@
 
 				menu.addSeparator(parent);
 
-				if (typeof(MathJax) !== 'undefined')
+				if (typeof(DrawioMathJax) !== 'undefined')
 				{
 					var item = this.addMenuItem(menu, 'mathematicalTypesetting', parent);
 
@@ -5462,23 +5584,14 @@
 					editorUi.menus.addMenuItems(menu, ['-', 'save'], parent);
 				}
 				
-				if (urlParams['saveAndExit'] == '1' || 
-					(urlParams['noSaveBtn'] == '1' &&
-					urlParams['saveAndExit'] != '0') || editorUi.mode == App.MODE_ATLAS)
+				editorUi.menus.addMenuItems(menu, ['saveAndExit'], parent);
+
+				if (file != null && file.isRevisionHistorySupported())
 				{
-					editorUi.menus.addMenuItems(menu, ['saveAndExit'], parent);
-					
-					if (file != null && file.isRevisionHistorySupported())
-					{
-						editorUi.menus.addMenuItems(menu, ['revisionHistory'], parent);
-					}
+					editorUi.menus.addMenuItems(menu, ['revisionHistory'], parent);
 				}
 				
 				menu.addSeparator(parent);
-			}
-			else if (editorUi.mode == App.MODE_ATLAS)
-			{
-				editorUi.menus.addMenuItems(menu, ['save', 'synchronize', '-'], parent);
 			}
 			else if (urlParams['noFileMenu'] != '1')
 			{
@@ -5680,6 +5793,12 @@
 			{
 				var file = editorUi.getCurrentFile();
 				editorUi.menus.addMenuItems(menu, ['new'], parent);
+
+				if (editorUi.isHomeEnabled != null && editorUi.isHomeEnabled())
+				{
+					editorUi.menus.addMenuItems(menu, ['myDiagrams'], parent);
+				}
+
 				editorUi.menus.addSubmenu('openFrom', menu, parent);
 
 				if (isLocalStorage)
@@ -5808,6 +5927,11 @@
 				else
 				{
 					this.addMenuItems(menu, ['new'], parent);
+				}
+
+				if (editorUi.isHomeEnabled != null && editorUi.isHomeEnabled())
+				{
+					this.addMenuItems(menu, ['myDiagrams'], parent);
 				}
 				
 				this.addSubmenu('openFrom', menu, parent);

@@ -3,15 +3,11 @@
  * Copyright (c) 2006-2016, draw.io AG
  */
 /**
- * Constructs a new point for the optional x and y coordinates. If no
- * coordinates are given, then the default values for <x> and <y> are used.
- * @constructor
- * @class Implements a basic 2D point. Known subclassers = {@link mxRectangle}.
- * @param {number} x X-coordinate of the point.
- * @param {number} y Y-coordinate of the point.
+ * Global types
  */
 /**
- * Global types
+ * Constructs a new page for the given diagram node. The node gets the given
+ * ID, or a new ID if it has none.
  */
 function DiagramPage(node, id)
 {
@@ -684,6 +680,20 @@ EditorUi.prototype.getPageById = function(id, pages)
 };
 
 /**
+ * Returns the page for the given data:page/id, link or null. Whitespace
+ * around the ID of a hand-typed link is ignored: "data:page/id, abc" gave
+ * "Page not found" (Kym, 2026-09-25). Page IDs from Editor.guid never
+ * contain whitespace, and an exact match still wins.
+ */
+EditorUi.prototype.getPageByLink = function(href, pages)
+{
+	var id = href.substring(href.indexOf(',') + 1);
+
+	return this.getPageById(id, pages) ||
+		this.getPageById(mxUtils.trim(id), pages);
+};
+
+/**
  * Returns the background image for the given page link.
  */
 EditorUi.prototype.createImageForPageLink = function(src, sourcePage, sourceGraph, addFonts)
@@ -741,7 +751,7 @@ EditorUi.prototype.pageSelected = function()
 
 			if (this.chromelessResize != null)
 			{
-				graph.container.scrollleft = 0;
+				graph.container.scrollLeft = 0;
 				graph.container.scrollTop = 0;
 				this.chromelessResize();
 			}
@@ -2489,7 +2499,8 @@ EditorUi.prototype.createPageMenuTab = function()
 };
 
 /**
- * Returns true if the given string contains an mxfile.
+ * Returns a new tab for the given page with its name, ID and the given page
+ * number in the tooltip.
  */
 EditorUi.prototype.createTabForPage = function(page, pageNumber)
 {
@@ -2511,10 +2522,8 @@ EditorUi.prototype.createTabForPage = function(page, pageNumber)
 };
 
 /**
- * Translates this point by the given vector.
- * 
- * @param {number} dx X-coordinate of the translation.
- * @param {number} dy Y-coordinate of the translation.
+ * Adds the listeners to the given tab for selecting the given page, renaming
+ * it on double click and showing its menu.
  */
 EditorUi.prototype.addTabListeners = function(page, tab)
 {
@@ -2588,7 +2597,7 @@ EditorUi.prototype.addTabListeners = function(page, tab)
 };
 
 /**
- * Returns true if the given string contains an mxfile.
+ * Returns a function that adds the menu items for the given page to a menu.
  */
 EditorUi.prototype.createPageMenu = function(page, label)
 {
