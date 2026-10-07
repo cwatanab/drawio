@@ -3155,6 +3155,68 @@ mxGraph.prototype.fit = function(border, keepOrigin, margin, enabled, ignoreWidt
 };
 
 /**
+ * Variable: containerMetrics
+ *
+ * Holds the metrics of the container while <updateContainerMetrics> runs
+ * its function (see <getContainerMetrics>). Default is null.
+ */
+mxGraph.prototype.containerMetrics = null;
+
+/**
+ * Function: getContainerMetrics
+ *
+ * Returns an object with the offsetWidth, offsetHeight, clientWidth,
+ * clientHeight, scrollLeft and scrollTop of the container and if it has
+ * scrollbars (see <mxUtils.hasScrollbars>). This returns <containerMetrics>
+ * while <updateContainerMetrics> runs its function, so that reading the
+ * metrics after the DOM was changed does not force a layout of the page.
+ */
+mxGraph.prototype.getContainerMetrics = function()
+{
+	var metrics = this.containerMetrics;
+
+	if (metrics == null && this.container != null)
+	{
+		var c = this.container;
+		metrics = {offsetWidth: c.offsetWidth, offsetHeight: c.offsetHeight,
+			clientWidth: c.clientWidth, clientHeight: c.clientHeight,
+			scrollLeft: c.scrollLeft, scrollTop: c.scrollTop,
+			scrollbars: mxUtils.hasScrollbars(c)};
+	}
+
+	return metrics;
+};
+
+/**
+ * Function: updateContainerMetrics
+ *
+ * Reads the metrics of the container before calling the given function,
+ * which changes the DOM but not the size of the container, and returns
+ * them in <getContainerMetrics> until the function returns. The client
+ * size may change if scrollbars appear and the scroll position if it is
+ * clamped, so the metrics are only used where this does not matter (eg.
+ * in <mxGraphView.viewStateChanged> in model coordinates).
+ */
+mxGraph.prototype.updateContainerMetrics = function(funct)
+{
+	var prev = this.containerMetrics;
+
+	if (prev == null)
+	{
+		this.containerMetrics = this.getContainerMetrics();
+	}
+
+	try
+	{
+		funct();
+	}
+	finally
+	{
+		this.containerMetrics = prev;
+	}
+};
+
+/**
  * Function: sizeDidChange
  * 
  * Called when the size of the graph has changed. This implementation fires
@@ -4910,9 +4972,10 @@ mxGraph.prototype.cellsAdded = function(cells, parent, index, source, target, ab
 	
 							// FIXME: Cells should always be inserted first before any other edit
 							// to avoid forward references in sessions.
+							// Edges only translate their terminal and control points
 							geo = geo.clone();
-							geo.translate(dx, dy);
-							
+							geo.translate(dx, dy, this.model.isEdge(cells[i]));
+
 							if (!geo.relative && this.model.isVertex(cells[i]) &&
 								!this.isAllowNegativeCoordinates())
 							{
@@ -5387,7 +5450,11 @@ mxGraph.prototype.splitEdge = function(edge, cells, newEdge, dx, dy, x, y, paren
 			{
 				var t = this.view.translate;
 				var s = this.view.scale;
-				var idx = mxUtils.findNearestSegment(state, (dx + t.x) * s, (dy + t.y) * s);
+
+				// Uses the drop location if available
+				var idx = (x != null && y != null) ?
+					mxUtils.findNearestSegment(state, x, y) :
+					mxUtils.findNearestSegment(state, (dx + t.x) * s, (dy + t.y) * s);
 				geo.points = geo.points.slice(0, idx);
 								
 				geo = this.getCellGeometry(edge);
@@ -11106,6 +11173,9 @@ mxGraph.prototype.isTerminalPointMovable = function(cell, source)
  * Returns true if the given cell is bendable. This returns <cellsBendable>
  * for all given cells if <isLocked> does not return true for the given
  * cell and its style does not specify <mxConstants.STYLE_BENDABLE> to be 0.
+ * Returns false while the control points of the cell are ignored in the
+ * view (see <mxGraphView.isCollapsedPointsIgnored>) so that the hidden
+ * points cannot be overwritten.
  * 
  * Parameters:
  * 
@@ -11115,7 +11185,8 @@ mxGraph.prototype.isCellBendable = function(cell)
 {
 	var style = this.getCurrentCellStyle(cell);
 	
-	return this.isCellsBendable() && !this.isCellLocked(cell) && style[mxConstants.STYLE_BENDABLE] != 0;
+	return this.isCellsBendable() && !this.isCellLocked(cell) && style[mxConstants.STYLE_BENDABLE] != 0 &&
+		!this.view.isCollapsedPointsIgnored(cell, style);
 };
 
 /**
@@ -13726,7 +13797,14 @@ mxGraph.prototype.fireMouseEvent = function(evtName, me, sender)
 	{
 		var currentTime = new Date().getTime();
 		
-		if (evtName == mxEvent.MOUSE_DOWN)
+		// Another finger is not a double tap (eg. the start of a pinch, where
+		// the location of a touch event is that of the first finger)
+		if (evtName == mxEvent.MOUSE_DOWN && mxEvent.isMultiTouchEvent(me.getEvent()))
+		{
+			this.lastTouchTime = 0;
+			this.fireDoubleClick = false;
+		}
+		else if (evtName == mxEvent.MOUSE_DOWN)
 		{
 			if (this.lastTouchEvent != null && this.lastTouchEvent != me.getEvent() &&
 				currentTime - this.lastTouchTime < this.doubleTapTimeout &&

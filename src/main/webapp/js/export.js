@@ -338,7 +338,7 @@ function render(data)
 				{
 					electron.sendMessage('export-error',
 						'Error parsing Mermaid: ' + (e.message || e));
-				}, null, true);
+				});
 			}
 			catch (e)
 			{
@@ -1040,8 +1040,13 @@ function render(data)
 							// Page-size export uses the page rectangle as the crop
 							// (see imagePageVisible in renderPage, which installs the
 							// getBackgroundPageBounds override that getSvg uses)
+							// Cell Metadata in the export dialog: adds the properties of
+							// the cells as data-meta-* attributes (see createSvgImageExport)
+							var imgExport = (data.embedCellMetadata == '1') ?
+								graph.createSvgImageExport(true) : null;
+
 							var svgRoot = graph.getSvg(bg, expScale, data.border, false, null,
-								true, null, null, linkTarget, null, null, theme,
+								true, null, imgExport, linkTarget, null, null, theme,
 								(data.exportType == 'page') ? 'page' : null);
 							
 							if (graph.shadowVisible)
@@ -1732,11 +1737,14 @@ function render(data)
 						GOOGLE_APPS_MAX_AREA = GOOGLE_SHEET_MAX_AREA;
 					}
 					
-					//The image cannot exceed 25 MP to be included in Google Apps
-					if (b.width * s * b.height * s > GOOGLE_APPS_MAX_AREA)
+					//The image cannot exceed 25 MP to be included in Google Apps, including the border
+					var bw = b.width + 2 * data.border;
+					var bh = b.height + 2 * data.border;
+
+					if (bw * s * bh * s > GOOGLE_APPS_MAX_AREA)
 					{
 						//Subtracting 0.01 to prevent any other rounding that can make slightly over 25 MP 
-						s = Math.sqrt(GOOGLE_APPS_MAX_AREA / (b.width * b.height)) - 0.01;
+						s = Math.sqrt(GOOGLE_APPS_MAX_AREA / (bw * bh)) - 0.01;
 					}
 				}
 				
@@ -1765,8 +1773,12 @@ function render(data)
 		// Gets the diagram bounds and sets the document size
 		bounds = (graph.pdfPageVisible || imagePageVisible) ?
 			graph.view.getBackgroundPageBounds() : graph.getGraphBounds();
-		bounds.width = Math.ceil(bounds.width + data.border) + 1; //The 1 extra pixels to prevent cutting the cells on the edges when crop is enabled
-		bounds.height = Math.ceil(bounds.height + data.border) + 1; //The 1 extra pixels to prevent starting a new page. TODO Not working in every case
+
+		// Right and bottom border, as wide as the left and top one: scaled with
+		// the diagram, except when it is fitted to a given width or height
+		var endBorder = (data.w > 0 || data.h > 0) ? data.border : data.border * graph.view.scale;
+		bounds.width = Math.ceil(bounds.width + endBorder) + 1; //The 1 extra pixels to prevent cutting the cells on the edges when crop is enabled
+		bounds.height = Math.ceil(bounds.height + endBorder) + 1; //The 1 extra pixels to prevent starting a new page. TODO Not working in every case
 		
 		// Print to pdf fails for 1x1 pages
 		if (bounds.width <= 1 && bounds.height <= 1)

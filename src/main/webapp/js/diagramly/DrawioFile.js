@@ -78,6 +78,83 @@ DrawioFile.prototype.savingStatusKey = 'saving';
 DrawioFile.prototype.autosaveDelay = 1500;
 
 /**
+ * True while a save operation is in progress. The subclasses set this in all
+ * places where a save starts or ends, so it is an accessor that invokes the
+ * callbacks of afterSave when it changes from true to false.
+ */
+Object.defineProperty(DrawioFile.prototype, 'savingFile',
+{
+	get: function()
+	{
+		return this.savingFileState;
+	},
+	set: function(value)
+	{
+		var wasSaving = this.savingFileState;
+		this.savingFileState = value;
+
+		if (wasSaving && !value)
+		{
+			this.saveCompleted();
+		}
+	},
+	configurable: true
+});
+
+/**
+ * Invokes the given function after the current save operation has ended,
+ * or asynchronously if no save is in progress. Use this to wait for a save
+ * before saving again instead of failing with App.ERROR_BUSY.
+ */
+DrawioFile.prototype.afterSave = function(fn)
+{
+	if (this.savingFile)
+	{
+		if (this.afterSaveCallbacks == null)
+		{
+			this.afterSaveCallbacks = [];
+		}
+
+		this.afterSaveCallbacks.push(fn);
+	}
+	else
+	{
+		window.setTimeout(fn, 0);
+	}
+};
+
+/**
+ * Invokes the callbacks of afterSave once the save operation has ended. The
+ * callbacks are invoked asynchronously so that the code that ended the save
+ * can finish handling the result first (eg. update the descriptor), and are
+ * kept for the next end of a save if a save was started meanwhile (eg. a
+ * retry after a conflict).
+ */
+DrawioFile.prototype.saveCompleted = function()
+{
+	var callbacks = this.afterSaveCallbacks;
+	this.afterSaveCallbacks = null;
+
+	if (callbacks != null)
+	{
+		window.setTimeout(mxUtils.bind(this, function()
+		{
+			for (var i = 0; i < callbacks.length; i++)
+			{
+				if (this.savingFile)
+				{
+					this.afterSave(callbacks[i]);
+				}
+				else
+				{
+					callbacks[i]();
+				}
+			}
+		}), 0);
+	}
+};
+
+/**
  * Specifies the maximum delay before an autosave is forced even if the graph
  * is being changed.
  */
@@ -2761,12 +2838,15 @@ DrawioFile.prototype.saveDraft = function(data)
 {
 	try
 	{
-		data = (data != null) ? data : this.ui.getFileData();
+		// Parsing the data of the current diagram to check if it is empty
+		// is only needed if the current page is empty
+		var check = data != null || this.ui.isCurrentPageEmpty();
+		data = (data != null) ? data : this.getDraftData();
 
 		// Empty diagrams are useless as drafts — drop any existing one
 		// instead of writing an empty record, so the post-restart prompt
 		// doesn't surface drafts that contain nothing to recover.
-		if (this.ui.isDiagramDataEmpty(data))
+		if (check && this.ui.isDiagramDataEmpty(data))
 		{
 			this.removeDraft();
 			return;
@@ -2802,6 +2882,18 @@ DrawioFile.prototype.saveDraft = function(data)
 		// Removes any stored draft
 		this.removeDraft();
 	}
+};
+
+/**
+ * Returns the data for a draft of this file: the XML of all pages without
+ * the pretty printing of getFileData, which takes several times longer and
+ * is not needed as drafts are never read or compared by people, and without
+ * the SVG or HTML of files with these extensions, as a draft is loaded as
+ * a diagram.
+ */
+DrawioFile.prototype.getDraftData = function()
+{
+	return mxUtils.getXml(this.ui.getXmlFileData());
 };
 
 /**

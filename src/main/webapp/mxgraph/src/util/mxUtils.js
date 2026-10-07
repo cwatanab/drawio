@@ -3747,10 +3747,26 @@ var mxUtils =
 	 */
 	ltrim: function(str, chars)
 	{
-		chars = chars || "\\s|\\0";
-		
-		return (str != null) ? str.replace(new RegExp("^[" + chars + "]+", "g"), "") : null;
+		// Precompiled expression for the default characters
+		var exp = (!chars) ? mxUtils.ltrimExpression :
+			new RegExp("^[" + chars + "]+", "g");
+
+		return (str != null) ? str.replace(exp, "") : null;
 	},
+
+	/**
+	 * Variable: ltrimExpression
+	 *
+	 * Expression for <ltrim> with the default characters.
+	 */
+	ltrimExpression: new RegExp("^[\\s|\\0]+", "g"),
+
+	/**
+	 * Variable: rtrimExpression
+	 *
+	 * Expression for <rtrim> with the default characters.
+	 */
+	rtrimExpression: new RegExp("[\\s|\\0]"),
 	
 	/**
 	 * Function: rtrim
@@ -3767,13 +3783,12 @@ var mxUtils =
 	 */
 	rtrim: function(str, chars)
 	{
-		chars = chars || "\\s|\\0";
-
 		if (str != null)
 		{
 			// Scans backwards as [chars]+$ takes quadratic time on a long run
 			// of these characters that is not at the end of the string
-			var exp = new RegExp("[" + chars + "]");
+			var exp = (!chars) ? mxUtils.rtrimExpression :
+				new RegExp("[" + chars + "]");
 			var end = str.length;
 
 			while (end > 0 && exp.test(str.charAt(end - 1)))
@@ -3869,6 +3884,28 @@ var mxUtils =
 	mod: function(n, m)
 	{
 		return ((n % m) + m) % m;
+	},
+
+	/**
+	 * Function: unscale
+	 *
+	 * Returns the given scaled coordinate in model units, that is, divided by
+	 * scale minus the optional translate, without the floating point noise of
+	 * the conversion so that rounding the result does not depend on the scale
+	 * or translate of the view.
+	 *
+	 * Parameters:
+	 *
+	 * value - Scaled coordinate to be converted.
+	 * scale - Scale of the view.
+	 * translate - Optional translate along the axis of the coordinate. Default
+	 * is 0.
+	 */
+	unscale: function(value, scale, translate)
+	{
+		translate = (translate != null) ? translate : 0;
+
+		return Math.round((value / scale - translate) * 1e6) / 1e6;
 	},
 
 	/**

@@ -2462,14 +2462,17 @@ var MarkupDialog = function(editorUi, title, value, fn, cancelFn, helpLink)
 
 	var sourceVisible = false;
 
+	// Style elements apply to the whole document while editing
 	function sourceToWysiwyg()
 	{
-		wysiwyg.innerHTML = Graph.sanitizeHtml(textarea.value);
+		wysiwyg.innerHTML = Graph.disableHtmlStyles(Graph.sanitizeHtml(
+			textarea.value), Graph.backupCssAttribute);
 	};
 
 	function wysiwygToSource()
 	{
-		return Graph.sanitizeHtml(wysiwyg.innerHTML);
+		return Graph.sanitizeHtml(Graph.getHtmlWithStyleElements(
+			wysiwyg, Graph.backupCssAttribute));
 	};
 
 	function getValue()
@@ -4046,9 +4049,8 @@ var EditDataDialog = function(ui, cell, optionalGraph)
 	{
 		var name = nameInput.value;
 
-		// Avoid ':' in attribute names which seems to be valid in Chrome
-		if (name.length > 0 && name != 'label' && name != 'id' &&
-			name != 'placeholders' && name.indexOf(':') < 0 &&
+		// Avoids reserved names and ':' in attribute names which seems to be valid in Chrome
+		if (name.length > 0 && !Graph.isReservedDataName(name) &&
 			EditDataDialog.isValidAttributeName(name))
 		{
 			try
@@ -4090,7 +4092,10 @@ var EditDataDialog = function(ui, cell, optionalGraph)
 		}
 		else
 		{
-			ui.showError(mxResources.get('error'), mxResources.get('invalidName'),
+			// Lists the reserved names if a reserved name was entered
+			ui.showError(mxResources.get('error'), mxResources.get('invalidName') +
+				((Graph.isReservedDataName(name)) ? ' (' +
+				Graph.reservedDataNames.join(', ') + ', :)' : ''),
 				mxResources.get('ok'));
 		}
 	});
@@ -4562,7 +4567,7 @@ var OutlineWindow = function(editorUi, x, y, w, h)
 
 	outline.init(div);
 	
-	mxEvent.addMouseWheelListener(function(evt, up)
+	mxEvent.addMouseWheelListener(function(evt, up, force, cx, cy, pinch)
 	{
 		var outlineWheel = false;
 		var source = mxEvent.getSource(evt);
@@ -4589,8 +4594,15 @@ var OutlineWindow = function(editorUi, x, y, w, h)
 				factor = 1 + (Math.abs(evt.deltaY) / 20) * (factor - 1);
 				smooth = true;
 			}
+			// Pinch gesture on touch screens zooms by the change of the
+			// distance between the fingers
+			else if (pinch != null)
+			{
+				factor = (pinch > 1) ? pinch : 1 / pinch;
+				smooth = true;
+			}
 
-			graph.lazyZoom(up, null, null, factor, smooth);
+			graph.lazyZoom(up, null, null, factor, smooth, true);
 			mxEvent.consume(evt);
 		}
 	});

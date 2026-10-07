@@ -2250,18 +2250,25 @@ App.prototype.init = function()
 				{
 					this.showDownloadDesktopBanner();
 				}
-
-				// Fits diagram to window
-				if (Editor.fitDiagramOnLoad)
-				{
-					this.fitInitialView();
-				}
 			}));
 		}
-		
+
 		// Checks if the cache is alive (also runs when the first file
 		// starts to sync, eg. in embed mode, see DrawioFileSync.start)
 		DrawioFileSync.checkCacheAlive(this);
+	}
+
+	// Fits the diagram after fileLoaded as the page fit in pageSelected is
+	// skipped while the file is opening (embed mode fits after setFileData)
+	if (!this.editor.chromeless || this.editor.editable)
+	{
+		this.editor.addListener('fileLoaded', mxUtils.bind(this, function()
+		{
+			if (Editor.fitDiagramOnLoad)
+			{
+				this.fitInitialView();
+			}
+		}));
 	}
 
 	this.updateHeader();
@@ -4411,6 +4418,12 @@ App.prototype.executeCreateObject = function(value, done)
 					this.handleError(e);
 				});
 
+				// A created diagram is new, so it gets the defaults version of
+				// new diagrams unless the link names one (eg. to match a preview
+				// that was rendered with another version)
+				var version = (value.version != null) ? String(value.version) :
+					EditorUi.getInsertMermaidVersion();
+
 				if (value.image)
 				{
 					// image:true creates the diagram as a static SVG image cell
@@ -4420,15 +4433,16 @@ App.prototype.executeCreateObject = function(value, done)
 					this.parseMermaidImage(data, mxUtils.bind(this, function(xml)
 					{
 						createDiagram(xml);
-					}), onMermaidError);
+					}), onMermaidError, version);
 				}
 				else
 				{
 					this.parseMermaidDiagram(data, null, mxUtils.bind(this, function(xml)
 					{
 						createDiagram(mxMermaidToDrawio.wrapGroup(xml, data,
-							EditorUi.getInsertMermaidConfig()));
-					}), onMermaidError);
+							EditorUi.getInsertMermaidConfig(),
+							(version != null) ? {version: version} : null));
+					}), onMermaidError, null, version);
 				}
 			}
 			else
@@ -4522,9 +4536,27 @@ App.prototype.openGenerateDialog = function(prompt)
 };
 
 /**
- * Generate a diagram for the given description.
+ * Returns true if templates can be inserted (see Insert, Template).
  */
-App.prototype.openTemplateDialog = function(generatePrompt)
+App.prototype.isTemplateSearchSupported = function()
+{
+	return this.insertTemplateEnabled && !this.isOffline() &&
+		this.editor.graph.isEnabled();
+};
+
+/**
+ * Opens the templates dialog with the given search terms.
+ */
+App.prototype.searchTemplates = function(terms)
+{
+	this.openTemplateDialog(null, terms);
+};
+
+/**
+ * Opens the templates dialog for inserting a template with the optional
+ * prompt for generating a diagram and the optional search terms.
+ */
+App.prototype.openTemplateDialog = function(generatePrompt, searchTerms)
 {
 	var graph = this.editor.graph;
 	
@@ -4544,7 +4576,8 @@ App.prototype.openTemplateDialog = function(generatePrompt)
 				graph.scrollCellToVisible(graph.getSelectionCell());
 			}
 		}), null, null, null, null, null, null, null, null, null, null,
-			false, mxResources.get('insert'), null, null, generatePrompt);
+			false, mxResources.get('insert'), null, null, generatePrompt,
+			null, true);
 
 		this.showDialog(dlg.container, 620, 460, true, true, mxUtils.bind(this, function()
 		{
@@ -4552,6 +4585,11 @@ App.prototype.openTemplateDialog = function(generatePrompt)
 		}));
 		
 		dlg.init();
+
+		if (searchTerms != null && searchTerms.length > 0)
+		{
+			dlg.searchTemplates(searchTerms);
+		}
 	}
 };
 
@@ -6193,12 +6231,9 @@ App.prototype.createFile = function(title, data, libs, mode, done, replace, fold
 				
 				this.showSaveFilePicker(mxUtils.bind(this, function(fileHandle, desc)
 				{
-					var file = new LocalFile(this, data, desc.name, null, fileHandle, desc);
-					
-					file.saveFile(desc.name, false, mxUtils.bind(this, function()
-					{
-						this.fileCreated(file, libs, replace, done, clibs, success);
-					}), error, true);
+					// File is written in fileCreated to use the format of the file name
+					this.fileCreated(new LocalFile(this, data, desc.name, null, fileHandle, desc),
+						libs, replace, done, clibs, success);
 				}), mxUtils.bind(this, function(e)
 				{
 					if (e.name != 'AbortError')
@@ -6367,17 +6402,14 @@ App.prototype.fileCreated = function(file, libs, replace, done, clibs, success)
 			}
 		});
 
-		// Updates data in memory for local files
-		if (file.constructor == LocalFile)
+		// Updates data in memory for local files without a file handle
+		if (file.constructor == LocalFile && file.fileHandle == null)
 		{
 			fn();
 		}
 		else
 		{
-			file.saveFile(file.getTitle(), false, mxUtils.bind(this, function()
-			{
-				fn();
-			}), mxUtils.bind(this, function(resp)
+			var saveError = mxUtils.bind(this, function(resp)
 			{
 				complete();
 
@@ -6385,7 +6417,20 @@ App.prototype.fileCreated = function(file, libs, replace, done, clibs, success)
 				{
 					this.handleError(resp);
 				}
-			}));
+			});
+
+			// Writes the data created above for new local files with a file handle
+			if (file.constructor == LocalFile)
+			{
+				file.saveFile(file.getTitle(), false, fn, saveError, true);
+			}
+			else
+			{
+				file.saveFile(file.getTitle(), false, mxUtils.bind(this, function()
+				{
+					fn();
+				}), saveError);
+			}
 		}
 	}
 };
@@ -7737,6 +7782,7 @@ App.prototype.save = function(name, done)
 {
 	var file = this.getCurrentFile();
 	var acceptResponse = true;
+	var saveFile = null;
 
 	var success = mxUtils.bind(this, function()
 	{
@@ -7754,7 +7800,34 @@ App.prototype.save = function(name, done)
 
 	var error = mxUtils.bind(this, function(err)
 	{
-		if (acceptResponse)
+		// Waits for a save operation in progress, eg. an autosave, and saves
+		// again with the spinner still active instead of showing the busy
+		// error (the spinner timeout ends the wait with a timeout error)
+		if (acceptResponse && err != null && err.code == App.ERROR_BUSY &&
+			file.savingFile && saveFile != null)
+		{
+			file.afterSave(mxUtils.bind(this, function()
+			{
+				if (acceptResponse)
+				{
+					if (this.getCurrentFile() != file)
+					{
+						acceptResponse = false;
+						this.spinner.stop();
+					}
+					else if (file.isModified())
+					{
+						saveFile();
+					}
+					else
+					{
+						// Changes were saved by the save in progress
+						success();
+					}
+				}
+			}));
+		}
+		else if (acceptResponse)
 		{
 			acceptResponse = false;
 
@@ -7799,6 +7872,25 @@ App.prototype.save = function(name, done)
 	if (file != null && this.spinner.spin(document.body,
 		mxResources.get('saving'), error, 3 * this.timeout))
 	{
+		saveFile = mxUtils.bind(this, function()
+		{
+			try
+			{
+				if (name == file.getTitle())
+				{
+					file.save(true, success, error);
+				}
+				else
+				{
+					file.saveAs(name, success, error)
+				}
+			}
+			catch (err)
+			{
+				error(err);
+			}
+		});
+
 		try
 		{
 			this.clearStatus();
@@ -7808,14 +7900,7 @@ App.prototype.save = function(name, done)
 				this.editor.graph.stopEditing();
 			}
 
-			if (name == file.getTitle())
-			{
-				file.save(true, success, error);
-			}
-			else
-			{
-				file.saveAs(name, success, error)
-			}
+			saveFile();
 		}
 		catch (err)
 		{
@@ -7915,7 +8000,9 @@ App.prototype.pickFolder = function(mode, fn, enabled, direct, force, returnPick
 		{
 			resume();
 			
-			if (evt.action == google.picker.Action.PICKED)
+			// Value of google.picker.Action.PICKED, which is not defined if
+			// the root folder was picked without loading the Picker API
+			if (evt.action == 'picked')
 			{
 				var folderId = null;
 				

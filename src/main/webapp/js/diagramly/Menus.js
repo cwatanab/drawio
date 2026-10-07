@@ -234,7 +234,9 @@
 		{
 			var compact = editorUi.isOffline();
 			
-			var dlg = new NewDialog(editorUi, compact, !(editorUi.mode == App.MODE_DEVICE && 'chooseFileSystemEntries' in window));
+			var dlg = new NewDialog(editorUi, compact, !(editorUi.mode == App.MODE_DEVICE &&
+				'chooseFileSystemEntries' in window), null, null, null, null, null, null,
+				null, null, null, null, null, null, null, null, null, null, null, true);
 
 			editorUi.showDialog(dlg.container, (compact) ? 350 : 620, (compact) ? 70 : 460, true, true, function(cancel)
 			{
@@ -357,9 +359,17 @@
 		meterAction.setToggleAction(true);
 		meterAction.setSelectedCallback(function() { return editorUi.editor.graph.view.unit == mxConstants.METERS; });
 
+		var cmAction = editorUi.actions.addAction('centimeters', function()
+		{
+			editorUi.editor.graph.view.setUnit(mxConstants.CENTIMETERS);
+		});
+
+		cmAction.setToggleAction(true);
+		cmAction.setSelectedCallback(function() { return editorUi.editor.graph.view.unit == mxConstants.CENTIMETERS; });
+
 		this.put('units', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
-			this.addMenuItems(menu, ['points', 'inches', 'millimeters', 'meters'], parent);
+			this.addMenuItems(menu, ['points', 'inches', 'millimeters', 'centimeters', 'meters'], parent);
 		
 			if (Editor.currentTheme == 'min' ||
 				Editor.currentTheme == 'simple' ||	
@@ -399,15 +409,19 @@
 			
 				if (node != null)
 				{
+					// Root class replaces html:has(.geFullscreen) in the CSS, which
+					// restyled the page after every change of the DOM
 					if (document.fullscreenElement == null)
 					{
 						document.body.requestFullscreen();
 						node.classList.add('geFullscreen');
+						document.documentElement.classList.add('geFullscreen');
 					}
 					else
 					{
 						document.exitFullscreen();
 						node.classList.remove('geFullscreen');
+						document.documentElement.classList.remove('geFullscreen');
 					}
 				}
 			}
@@ -1553,6 +1567,29 @@
 		{
 			editorUi.updateOfflineLanguages();
 
+			// The language dialog installs bundles through the active
+			// service worker, which need not control this page (the load
+			// that installed it, hard reloads)
+			var serviceWorkerReady = false;
+
+			try
+			{
+				if (navigator.serviceWorker != null)
+				{
+					navigator.serviceWorker.ready.then(function()
+					{
+						serviceWorkerReady = true;
+					})['catch'](function()
+					{
+						// ignore
+					});
+				}
+			}
+			catch (e)
+			{
+				// ignore
+			}
+
 			this.put('language', new Menu(mxUtils.bind(this, function(menu, parent)
 			{
 				// Refreshes the offline availability of the language bundles
@@ -1607,8 +1644,7 @@
 
 				// Language dialog with the offline bundles - only useful
 				// where a service worker caches them on use
-				if ('serviceWorker' in navigator &&
-					navigator.serviceWorker.controller != null)
+				if (serviceWorkerReady)
 				{
 					menu.addSeparator(parent);
 
@@ -5212,8 +5248,12 @@
 		{
 			// Last entry edits cell label
 			this.addMenuItems(menu, ['editLink', 'editShape', 'editImage', 'crop', '-',
-				'editData', 'copyData', 'pasteData', '-', 'editPolygon', 'editConnectionPoints',
-				'editGeometry', '-', 'editTooltip', 'editNote', 'editStyle', '-', 'edit'], parent);
+				'editData', 'copyData', 'pasteData', '-', 'editPolygon'], parent);
+			// This submenu is only opened from the context menu, whose
+			// trigger point is the location of the new connection point
+			this.addConnectionPointMenuItem(menu, graph.getSelectionCell(), parent);
+			this.addMenuItems(menu, ['editConnectionPoints', 'editGeometry', '-',
+				'editTooltip', 'editNote', 'editStyle', '-', 'edit'], parent);
 		})));
 				
 		// Current page menu

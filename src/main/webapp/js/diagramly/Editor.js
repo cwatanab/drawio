@@ -807,11 +807,14 @@
         {name: 'strokeOpacity', dispName: 'Stroke Opacity', type: 'int', min: 0, max: 100, defVal: 100},
         {name: 'startFill', dispName: 'Start Fill', type: 'bool', defVal: true},
 		{name: 'startFillColor', dispName: 'Start Fill Color', type: 'color', defVal: null},
+		{name: 'startStrokeColor', dispName: 'Start Stroke Color', type: 'color', defVal: null},
         {name: 'endFill', dispName: 'End Fill', type: 'bool', defVal: true},
 		{name: 'endFillColor', dispName: 'End Fill Color', type: 'color', defVal: null},
+		{name: 'endStrokeColor', dispName: 'End Stroke Color', type: 'color', defVal: null},
         {name: 'perimeterSpacing', dispName: 'Terminal Spacing', type: 'float', defVal: 0},
         {name: 'anchorPointDirection', dispName: 'Anchor Direction', type: 'bool', defVal: true},
         {name: 'snapToPoint', dispName: 'Snap to Point', type: 'bool', defVal: false},
+        {name: 'fixedPointSpacing', dispName: 'Fixed Point Spacing', type: 'bool', defVal: false},
         {name: 'dashPattern', dispName: 'Dash Pattern', type: 'numbers', defVal: ''},
         {name: 'fixDash', dispName: 'Fixed Dash', type: 'bool', defVal: false},
 		{name: 'flowAnimationDuration', dispName: 'Flow Duration', type: 'int', defVal: 500, isVisible: function(state)
@@ -837,14 +840,26 @@
         {name: 'metaEdit', dispName: 'Edit Dialog', type: 'bool', defVal: false},
         {name: 'backgroundOutline', dispName: 'Background Outline', type: 'bool', defVal: false},
         {name: 'bendable', dispName: 'Bendable', type: 'bool', defVal: true},
+        {name: 'collapsedPoints', dispName: 'Collapsed Waypoints', type: 'bool', defVal: true},
         {name: 'movable', dispName: 'Movable', type: 'bool', defVal: true},
         {name: 'cloneable', dispName: 'Cloneable', type: 'bool', defVal: true},
         {name: 'deletable', dispName: 'Deletable', type: 'bool', defVal: true},
         {name: 'noJump', dispName: 'No Jumps', type: 'bool', defVal: false},
+        {name: 'jumpLayers', dispName: 'Jump Other Layers', type: 'bool', defVal: true},
 		{name: 'ignoreEdge', dispName: 'Ignore Edge', type: 'bool', defVal: false},
         {name: 'orthogonalLoop', dispName: 'Loop Routing', type: 'bool', defVal: false},
 		{name: 'orthogonal', dispName: 'Orthogonal', type: 'bool', defVal: false}
 	].concat(Editor.commonProperties);
+
+	/**
+	 * Property for the rounded outline of rectangles and labels (connection points
+	 * and floating edges, see Graph.isRoundedPerimeter).
+	 */
+	Editor.roundedPerimeterProperty = {name: 'roundedPerimeter', dispName: 'Rounded Perimeter',
+		type: 'bool', defVal: false, isVisible: function(state, format)
+		{
+			return mxUtils.getValue(state.style, mxConstants.STYLE_ROUNDED, '0') == '1';
+		}};
 
 	/**
 	 * Common properties for all vertices.
@@ -1836,18 +1851,35 @@
 				
 				if (arguments.length > 2)
 				{
-					var s = this.canvas.state;
-		
+					var tr = this.getViewTranslate();
+
 					for (var i = 2; i < arguments.length; i += 2)
 					{
 						this.lastX = arguments[i - 1];
 						this.lastY = arguments[i];
-						
-						this.path.push(this.canvas.format((this.lastX)));
-						this.path.push(this.canvas.format((this.lastY)));
+
+						this.path.push(this.canvas.format(this.lastX - tr.x));
+						this.path.push(this.canvas.format(this.lastY - tr.y));
 					}
 				}
 			}
+		};
+
+		/**
+		 * Returns the view translate in the coordinates of the shape. Rough.js
+		 * rounds hachure lines to whole units, so the coordinates are passed in
+		 * diagram units to keep fills independent of the view translate.
+		 */
+		RoughCanvas.prototype.getViewTranslate = function()
+		{
+			var tr = this.shape.viewTranslate;
+
+			if (tr == null && this.shape.state != null)
+			{
+				tr = this.shape.state.view.translate;
+			}
+
+			return (tr != null) ? tr : new mxPoint();
 		};
 	
 		RoughCanvas.prototype.lineTo = function(endX, endY)
@@ -1952,8 +1984,10 @@
 			}
 			else
 			{
+				var tr = this.getViewTranslate();
 				this.path = [];
-				this.nextShape = this.rc.generator.rectangle(x, y, w, h, this.getStyle(true, true));
+				this.nextShape = this.rc.generator.rectangle(x - tr.x, y - tr.y,
+					w, h, this.getStyle(true, true));
 			}
 		};
 	
@@ -1965,8 +1999,10 @@
 			}
 			else
 			{
+				var tr = this.getViewTranslate();
 				this.path = [];
-				this.nextShape = this.rc.generator.ellipse(x + w / 2, y + h / 2, w, h, this.getStyle(true, true));
+				this.nextShape = this.rc.generator.ellipse(x + w / 2 - tr.x,
+					y + h / 2 - tr.y, w, h, this.getStyle(true, true));
 			}
 		};
 			
@@ -1993,6 +2029,16 @@
 	
 		RoughCanvas.prototype.drawPath = function(style)
 		{
+			// Paints the output in the coordinates of the shape
+			var tr = this.getViewTranslate();
+			var translate = tr.x != 0 || tr.y != 0;
+
+			if (translate)
+			{
+				this.canvas.save();
+				this.canvas.translate(tr.x, tr.y);
+			}
+
 			if (this.path.length > 0)
 			{
 				this.passThrough = true;
@@ -2012,22 +2058,27 @@
 				{
 					this.nextShape.options[key] = style[key];
 				}
-				
+
 				if (style['stroke'] == mxConstants.NONE ||
 					style['stroke'] == null)
 				{
 					delete this.nextShape.options['stroke'];
 				}
-				
+
 				if (!style.filled)
 				{
 					delete this.nextShape.options['fill'];
 				}
-	
+
 				this.passThrough = true;
 				this.rc.draw(this.nextShape);
 				this.passThrough = false;
-			}	
+			}
+
+			if (translate)
+			{
+				this.canvas.restore();
+			}
 		};
 		
 		RoughCanvas.prototype.stroke = function()
@@ -3003,6 +3054,11 @@
 			if (config.optimizeHtmlLabels != null)
 			{
 				Editor.optimizeHtmlLabels = config.optimizeHtmlLabels;
+			}
+
+			if (config.fastRendering != null)
+			{
+				Editor.fastRendering = config.fastRendering;
 			}
 
 			if (config.mathOutputSize != null)
@@ -4361,11 +4417,6 @@
 					this.graph.setBackgroundImage(null);
 				}
 				
-				this.graph.useCssTransforms = !mxClient.NO_FO &&
-					this.isChromelessView() &&
-					this.graph.isCssTransformsSupported();
-				this.graph.updateCssTransform();
-
 				this.graph.setShadowVisible(node.getAttribute('shadow') == '1', false);
 				
 				var extFonts = node.getAttribute('extFonts');
@@ -4514,29 +4565,10 @@
 		this.graph.setAdaptiveColors(null);
 		this.graph.view.x0 = null;
 		this.graph.view.y0 = null;
-		
-		this.graph.useCssTransforms = !mxClient.NO_FO &&
-			this.isChromelessView() &&
-			this.graph.isCssTransformsSupported();
-		this.graph.updateCssTransform();
-		
+
 		editorResetGraph.apply(this, arguments);
 	};
 
-	/**
-	 * Math support.
-	 */
-	var editorUpdateGraphComponents = Editor.prototype.updateGraphComponents;
-	Editor.prototype.updateGraphComponents = function()
-	{
-		editorUpdateGraphComponents.apply(this, arguments);
-		
-		this.graph.useCssTransforms = !mxClient.NO_FO &&
-			this.isChromelessView() &&
-			this.graph.isCssTransformsSupported();
-		this.graph.updateCssTransform();
-	};
-	
 	/**
 	 * Initializes math typesetting. The code is loaded when math is first
 	 * typeset (see Editor.loadMath). It uses its own global, DrawioMathJax,
@@ -4736,6 +4768,28 @@
 
 						Editor.MathJaxRender(this.graph.container);
 					}
+					else if (this.graph.container != null &&
+						Editor.mathJaxQueue != null)
+					{
+						// Cancels typesetting that waits for MathJax if math was
+						// disabled in the meantime, eg. after switching to a page
+						// without math, and shows the container again
+						var queued = false;
+
+						for (var i = Editor.mathJaxQueue.length - 1; i >= 0; i--)
+						{
+							if (Editor.mathJaxQueue[i] == this.graph.container)
+							{
+								Editor.mathJaxQueue.splice(i, 1);
+								queued = true;
+							}
+						}
+
+						if (queued && Editor.mathOutputSize)
+						{
+							this.graph.container.style.visibility = '';
+						}
+					}
 				});
 
 				this.graph.model.addListener(mxEvent.CHANGE, renderMath);
@@ -4801,15 +4855,27 @@
 	 * invisible text over the formula, so that math can be selected, searched
 	 * and copied in PDF output. The SVG output draws glyphs as paths, which
 	 * leaves formulas out of the text of a PDF. The text is the formula as typed
-	 * including its delimiters, on the baseline of the formula at the size of the
-	 * surrounding text and stretched to the width of the formula. It is
-	 * transparent rather than hidden: Chrome writes transparent text to the PDF
-	 * with a fill opacity of 0, which keeps it selectable. The role img that
-	 * MathJax puts on the SVG is removed, as Chrome writes tagged PDFs and
-	 * leaves the content of an image out of the text structure, which is
-	 * what macOS Preview selects and searches. Only used for PDF export and
-	 * print, where nothing else needs the formula for selection. The source
-	 * is added as a text node, so it cannot inject markup.
+	 * including its delimiters, on the baseline of the formula and stretched to
+	 * the width of the formula. It is nearly transparent rather than hidden,
+	 * which keeps it selectable. The alpha is not 0 as older Chrome versions
+	 * (eg. 128 in the export server, still 136) leave fully transparent text
+	 * out of the PDF.
+	 *
+	 * The text is HTML in a foreignObject at a font size of 16px, scaled to
+	 * the size of the formula with a transform. Chrome writes SVG text, and
+	 * HTML text at the font size of the viewBox units (1000 per em) under the
+	 * small scale of the viewBox, as one text run per glyph, which macOS
+	 * Preview breaks into lines at glyphs above or below the others (eg. _ and
+	 * `). The foreignObject is painted with the formula, so that the source
+	 * keeps its place in the surrounding text, which it would not as a
+	 * transformed HTML element outside of the SVG.
+	 *
+	 * The role img that MathJax puts on the SVG is removed, as Chrome writes
+	 * tagged PDFs and leaves the content of an image out of the text
+	 * structure, which is what macOS Preview selects and searches. Only used
+	 * for PDF export and print, where nothing else needs the formula for
+	 * selection. The source is added as a text node, so it cannot inject
+	 * markup.
 	 */
 	Editor.addMathTextLayer = function(container, mathJax)
 	{
@@ -4826,6 +4892,7 @@
 		}
 
 		var items = doc.getMathItemsWithin(container);
+		var layers = [];
 
 		for (var i = 0; i < items.length; i++)
 		{
@@ -4840,26 +4907,66 @@
 			if (svg != null && svg.nodeName.toLowerCase() == 'svg' &&
 				svg.viewBox != null && svg.viewBox.baseVal != null &&
 				svg.viewBox.baseVal.width > 0 && source.length > 0 &&
-				!(svg.lastChild != null && svg.lastChild.nodeName.toLowerCase() == 'text' &&
+				!(svg.lastChild != null && svg.lastChild.nodeName.toLowerCase() == 'foreignobject' &&
 				svg.lastChild.getAttribute('class') == 'geMathSource'))
 			{
 				// The viewBox has the baseline at 0 and 1000 units per em of
-				// the math, which is scaled relative to the surrounding text
+				// the math, which is scaled relative to the surrounding text.
+				// Units of the foreignObject are 16px per em of the surrounding
+				// text.
 				var vb = svg.viewBox.baseVal;
 				var scale = (item.metrics != null && item.metrics.scale > 0) ?
 					item.metrics.scale : 1;
+				var units = 1000 / scale / 16;
+				var ownerDoc = svg.ownerDocument;
 
-				var text = svg.ownerDocument.createElementNS(mxConstants.NS_SVG, 'text');
-				text.setAttribute('class', 'geMathSource');
-				text.setAttribute('x', vb.x);
-				text.setAttribute('y', '0');
-				text.setAttribute('font-size', 1000 / scale);
-				text.setAttribute('textLength', vb.width);
-				text.setAttribute('lengthAdjust', 'spacingAndGlyphs');
-				text.setAttribute('fill-opacity', '0');
+				var fo = ownerDoc.createElementNS(mxConstants.NS_SVG, 'foreignObject');
+				fo.setAttribute('class', 'geMathSource');
+				fo.setAttribute('y', vb.y / units);
+				fo.setAttribute('width', vb.width / units);
+				fo.setAttribute('height', vb.height / units);
+				fo.style.overflow = 'visible';
+
+				// Resets the inherited text styles that would show the text
+				// or position each glyph separately
+				var div = ownerDoc.createElement('div');
+				div.style.cssText = 'font-size:16px;line-height:0;white-space:pre;' +
+					'color:rgba(0,0,0,0.002);text-shadow:none;letter-spacing:normal;' +
+					'word-spacing:normal;text-transform:none;text-align:left;direction:ltr;';
+
+				// Empty inline block with its bottom on the baseline of the
+				// text, as high as the formula above its baseline
+				var strut = ownerDoc.createElement('span');
+				strut.style.display = 'inline-block';
+				strut.style.height = Math.max(0, -vb.y / units) + 'px';
+				div.appendChild(strut);
+
+				var text = ownerDoc.createElement('span');
 				mxUtils.write(text, source);
-				svg.appendChild(text);
-				svg.removeAttribute('role');
+				div.appendChild(text);
+				fo.appendChild(div);
+				svg.appendChild(fo);
+
+				layers.push({svg: svg, fo: fo, text: text, vb: vb, units: units});
+			}
+		}
+
+		// Measures after all layers were added for a single layout
+		for (var i = 0; i < layers.length; i++)
+		{
+			var layer = layers[i];
+			var textWidth = layer.text.offsetWidth;
+
+			if (textWidth > 0)
+			{
+				layer.fo.setAttribute('width', textWidth);
+				layer.fo.setAttribute('transform', 'translate(' + layer.vb.x + ',0)' +
+					'scale(' + (layer.vb.width / textWidth) + ',' + layer.units + ')');
+				layer.svg.removeAttribute('role');
+			}
+			else
+			{
+				layer.fo.parentNode.removeChild(layer.fo);
 			}
 		}
 	};
@@ -7247,6 +7354,7 @@
 		mxCellRenderer.prototype.defaultVertexShape.prototype.customProperties = [
 	        {name: 'arcSize', dispName: 'Arc Size', type: 'float', min:0, defVal: mxConstants.LINE_ARCSIZE},
 	        {name: 'absoluteArcSize', dispName: 'Abs. Arc Size', type: 'bool', defVal: false},
+	        Editor.roundedPerimeterProperty,
 	        {name: 'footerSize', dispName: 'Footer Size', type: 'float', min: 0, defVal: 0},
 	        // primary shows the color in the style panel (see getCustomColors)
 	        // for cells that actually have a footer
@@ -7280,6 +7388,13 @@
 	        {name: 'width', dispName: 'Width', type: 'float', min:0, defVal: 10},
 	        {name: 'startWidth', dispName: 'Start Width', type: 'float', min:0, defVal: 20},
 	        {name: 'endWidth', dispName: 'End Width', type: 'float', min:0, defVal: 20}
+		];
+
+		mxCellRenderer.defaultShapes['taperedArrow'].prototype.customProperties = [
+	        {name: 'startWidth', dispName: 'Start Width', type: 'float', min:0,
+	        	defVal: mxCellRenderer.defaultShapes['taperedArrow'].prototype.defaultStartWidth},
+	        {name: 'endWidth', dispName: 'End Width', type: 'float', min:0,
+	        	defVal: mxCellRenderer.defaultShapes['taperedArrow'].prototype.defaultEndWidth}
 		];
 
 		mxCellRenderer.defaultShapes['process'].prototype.customProperties = [
@@ -7433,7 +7548,9 @@
 			{name: 'columnLines', dispName: 'Column Lines', type: 'bool', defVal: true},
 			{name: 'fixedRows', dispName: 'Fixed Rows', type: 'bool', defVal: false},
 			{name: 'resizeLast', dispName: 'Resize Last Column', type: 'bool', defVal: false},
-			{name: 'resizeLastRow', dispName: 'Resize Last Row', type: 'bool', defVal: false}].
+			{name: 'resizeLastRow', dispName: 'Resize Last Row', type: 'bool', defVal: false},
+			{name: 'tableRender', dispName: 'Borders', type: 'enum', defVal: 'separate',
+				enumList: [{val: 'separate', dispName: 'Separate'}, {val: 'collapsed', dispName: 'Collapsed'}]}].
 			concat(mxCellRenderer.defaultShapes['swimlane'].prototype.customProperties).
 			concat(mxCellRenderer.defaultShapes['partialRectangle'].prototype.customProperties);
 
@@ -7474,6 +7591,7 @@
 	        {name: 'imageHeight', dispName: 'Image Height', type: 'float', min:0, defVal: 24},
 	        {name: 'arcSize', dispName: 'Arc Size', type: 'float', min:0, defVal: 12},
 	        {name: 'absoluteArcSize', dispName: 'Abs. Arc Size', type: 'bool', defVal: false},
+	        Editor.roundedPerimeterProperty,
 	        {name: 'footerSize', dispName: 'Footer Size', type: 'float', min: 0, defVal: 0},
 	        // primary shows the color in the style panel (see getCustomColors)
 	        // for cells that actually have a footer
@@ -8586,8 +8704,9 @@
 										continue;
 									}
 
+									// Tables and rows without a title are filled with the lane color
 									var fillKey = (meta.isLabel) ? mxConstants.STYLE_LABEL_BACKGROUNDCOLOR :
-										mxConstants.STYLE_FILLCOLOR;
+										graph.getFillColorKey(cells[i]);
 									var strokeKey = (meta.isLabel) ? mxConstants.STYLE_LABEL_BORDERCOLOR :
 										mxConstants.STYLE_STROKECOLOR;
 
@@ -8929,12 +9048,23 @@
 	 * Uses CSS2 for Google fonts to support bold font style eg.
 	 * https://fonts.googleapis.com/css?family=IBM+Plex+Sans is rewritten as
 	 * https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500
+	 *
+	 * Only a single plain family name is rewritten. Anything else, such as a
+	 * CSS1 weight list (Roboto:400,700), multiple families (Roboto|Lato) or
+	 * extra parameters (&display=swap), raw or percent-encoded, is returned
+	 * unchanged as the CSS1 API still serves it and appending the CSS2 axis
+	 * to it gives an invalid request (HTTP 400).
 	 */
 	Graph.rewriteGoogleFontUrl = function(url)
 	{
 		if (url != null && url.substring(0, Editor.GOOGLE_FONTS.length) == Editor.GOOGLE_FONTS)
 		{
-			url = Editor.GOOGLE_FONTS_CSS2 + url.substring(Editor.GOOGLE_FONTS.length) + ':wght@400;500';
+			var family = url.substring(Editor.GOOGLE_FONTS.length);
+
+			if (/^(?:[\w+ \-]|%20)+$/.test(family))
+			{
+				url = Editor.GOOGLE_FONTS_CSS2 + family + ':wght@400;500';
+			}
 		}
 
 		return url;
@@ -9383,7 +9513,7 @@
 		{
 			graph.setHiddenTags(visible ? [] : allTags.slice());
 			removeInvisibleSelectionCells();
-			graph.refresh();
+			graph.refreshHiddenTags();
 		};
 		
 		graph.addListener(mxEvent.ROOT, function()
@@ -9418,7 +9548,7 @@
 								temp.splice(index, 1);
 								graph.setHiddenTags(temp);
 								removeInvisibleSelectionCells();
-								graph.refresh();
+								graph.refreshHiddenTags();
 							};
 
 							function selectCells()
@@ -9495,13 +9625,13 @@
 									}
 
 									removeInvisibleSelectionCells();
-									graph.refresh();
+									graph.refreshHiddenTags();
 								}
 								else
 								{
 									graph.toggleHiddenTag(tag);
 									removeInvisibleSelectionCells();
-									graph.refresh();
+									graph.refreshHiddenTags();
 								}
 
 								mxEvent.consume(evt);
@@ -9732,7 +9862,7 @@
 				}
 	
 				removeInvisibleSelectionCells();
-				graph.refresh();
+				graph.refreshHiddenTags();
 				mxEvent.consume(evt);
 			});
 
@@ -10134,11 +10264,20 @@
 	};
 
 	/**
-	 * Adds drawing and update of the shape number.
+	 * Adds drawing and update of the shape number. If keepValue is true then
+	 * an existing number is kept (eg. in exports, which do not number the
+	 * cells in a validation).
 	 */
-	mxGraphView.prototype.redrawEnumerationState = function(state)
+	mxGraphView.prototype.redrawEnumerationState = function(state, keepValue)
 	{
 		var enumerate = mxUtils.getValue(state.style, 'enumerate', 0) == '1';
+
+		// The numbers depend on the order of the walk over all cells (see
+		// mxGraphView.validateInvalidCells)
+		if (enumerate)
+		{
+			this.fullValidationRequired = true;
+		}
 
 		if (enumerate && state.secondLabel == null)
 		{
@@ -10161,7 +10300,8 @@
 		if (shape != null)
 		{
 			var s = state.view.scale;
-			var value = this.createEnumerationValue(state);
+			var value = (keepValue && shape.value != null) ? shape.value :
+				this.createEnumerationValue(state);
 			var bounds = this.graph.model.isVertex(state.cell) ?
 				new mxRectangle(state.x + state.width - 4 * s, state.y + 4 * s, 0, 0) :
 				mxRectangle.fromPoint(state.view.getPoint(state));
@@ -10389,40 +10529,70 @@
 	};
 
 	/**
-	 * Sets a CSS `transition: transform …` on the SVG group used in
-	 * chromeless mode. The next change to the group's `transform`
-	 * attribute (driven by updateCssTransform) will animate. The
-	 * transition is auto-cleared on `transitionend` and via a
-	 * setTimeout fail-safe (in case the new transform equals the old
-	 * and `transitionend` never fires).
+	 * Animates the view from the given previous scale and translate to the
+	 * current ones in the given duration (default 600 ms). The panes are
+	 * painted for the current view state, and a CSS transform on the canvas
+	 * that maps them to the previous view state transitions to the identity,
+	 * so the background, the cells and the overlays move together. Any
+	 * other change of the view state stops the transition, so user-driven
+	 * zoom and pan snap instantly.
 	 */
-	Graph.applyTransformTransition = function(graph, duration)
+	Graph.prototype.transitionViewState = function(scale, translate, duration)
 	{
-		duration = duration || 600;
-		var pane = graph.view.getDrawPane();
-		var node = (pane != null) ? pane.parentNode : null;
-		if (node == null) return;
+		duration = (duration != null) ? duration : 600;
+		var view = this.view;
+		var node = view.getCanvas();
 
-		var prev = node.style.transition;
-		node.style.transition = 'transform ' + duration +
-			'ms cubic-bezier(0.16, 1, 0.3, 1)';
-
-		// Mark that the *next* transform change (the one this smooth step
-		// is about to make via updateCssTransform) is the intended one to
-		// animate. updateCssTransform consumes this flag; any other
-		// transform update (toolbar zoom/fit, wheel zoom, …) finds it unset
-		// and strips the transition so the viewport snaps instantly — the
-		// easing must not bleed onto user-driven viewport changes.
-		graph.armTransformTransition = true;
-
-		var clear = function()
+		if (this.stopViewStateTransition != null)
 		{
-			node.style.transition = prev || '';
-			graph.armTransformTransition = false;
-			node.removeEventListener('transitionend', clear);
-		};
-		node.addEventListener('transitionend', clear);
-		window.setTimeout(clear, duration + 100);
+			this.stopViewStateTransition();
+		}
+
+		// Maps (m + t) * s for the current view state to the previous one
+		var k = scale / view.scale;
+		var dx = scale * (translate.x - view.translate.x);
+		var dy = scale * (translate.y - view.translate.y);
+
+		if (node != null && (k != 1 || dx != 0 || dy != 0))
+		{
+			var thread = null;
+
+			var stop = mxUtils.bind(this, function()
+			{
+				node.style.transition = '';
+				node.style.transform = '';
+				node.style.transformOrigin = '';
+				node.removeEventListener('transitionend', transitionEnd);
+				view.removeListener(stop);
+				window.clearTimeout(thread);
+				this.stopViewStateTransition = null;
+			});
+
+			// Ignores transitions of descendants, eg. fading highlights
+			var transitionEnd = function(evt)
+			{
+				if (evt.target == node)
+				{
+					stop();
+				}
+			};
+
+			node.style.transition = 'none';
+			node.style.transformOrigin = '0 0';
+			node.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + k + ')';
+
+			// Forces the start state to be applied before the transition
+			node.getBoundingClientRect();
+			node.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.16, 1, 0.3, 1)';
+			node.style.transform = 'translate(0px,0px) scale(1)';
+
+			node.addEventListener('transitionend', transitionEnd);
+			view.addListener(mxEvent.SCALE, stop);
+			view.addListener(mxEvent.TRANSLATE, stop);
+			view.addListener(mxEvent.SCALE_AND_TRANSLATE, stop);
+			thread = window.setTimeout(stop, duration + 100);
+			this.stopViewStateTransition = stop;
+		}
 	};
 
 	/**
@@ -10439,15 +10609,14 @@
 	 *     scrollLeft=0. Users expect the scrollbars' top-left to
 	 *     always show the top-left of the diagram, regardless of
 	 *     where the viewbox is centered.
-	 *   • Scale changes via CSS transform are visually instant and
-	 *     don't require re-rendering cells.
+	 *   • Scale changes with model coordinates are visually instant
+	 *     and don't require re-rendering cells.
 	 *
 	 * `view.setScale` routes through `viewStateChanged → validate +
 	 * sizeDidChange`. The latter resizes the SVG root's
-	 * `minWidth/minHeight` based on `getGraphBounds()` (which, in
-	 * useCssTransforms mode, returns `(graphBounds + currentTranslate)
-	 * * currentScale`). So the container's scrollable area grows /
-	 * shrinks with the scale, and the existing `currentTranslate`
+	 * `minWidth/minHeight` based on `getGraphBounds()`, which is
+	 * `(bounds in model units + translate) * scale`. So the container's
+	 * scrollable area grows / shrinks with the scale, and the translate
 	 * keeps the diagram's top-left anchored to the same SVG point.
 	 */
 	Graph.prototype.fitBoundsCssTransform = function(bounds, border)
@@ -10459,7 +10628,7 @@
 		// scroll into, so they'd just leave the viewbox off-centre at
 		// the edges. Intersecting with the diagram gives a viewbox we
 		// can actually position.
-		var gb = this.view.graphBounds;
+		var gb = this.view.getModelGraphBounds();
 		var areaLeft = gb.x;
 		var areaTop = gb.y;
 		var areaRight = gb.x + gb.width;
@@ -10474,8 +10643,7 @@
 
 		var cw = this.container.clientWidth - b;
 		var ch = this.container.clientHeight - b;
-		var scale = Math.floor(20 * Math.min(
-			cw / vbWidth, ch / vbHeight)) / 20;
+		var scale = this.getFitScale(Math.min(cw / vbWidth, ch / vbHeight));
 
 		// Editor-style layout for the lightbox: translate so the
 		// diagram's top-left maps to SVG (0, 0). After `sizeDidChange`
@@ -10493,6 +10661,7 @@
 		// viewbox clicks at different zoom levels don't shift the
 		// scroll-origin's meaning.
 		this.view.scaleAndTranslate(scale, -gb.x, -gb.y);
+		this.fitScale = this.view.scale;
 
 		// With the new translate, graph (gx, gy) renders at SVG position
 		// `(gx - gb.x) * scale`. Centre the clamped viewbox in the
@@ -10521,11 +10690,11 @@
 	/**
 	 * Smooth variant of `fitWindow`.
 	 *
-	 *   • Chromeless — `fitBoundsCssTransform` changes scale via CSS
-	 *     transform and snaps scrollLeft/scrollTop to centre the
-	 *     bounds. We arm a CSS `transition: transform` so the scale
-	 *     animation is visually smooth, and tween scrollLeft/scrollTop
-	 *     in parallel with `smoothScrollContainer`.
+	 *   • Chromeless — `fitBoundsCssTransform` changes the scale and
+	 *     snaps scrollLeft/scrollTop to centre the bounds.
+	 *     `transitionViewState` animates the canvas from the previous
+	 *     scale, and `smoothScrollContainer` tweens scrollLeft/scrollTop
+	 *     in parallel.
 	 *
 	 *   • Editor — mxGraphView re-renders at each scale change, so we
 	 *     can't tween scale visually. Snap the zoom via fitWindow, then
@@ -10561,10 +10730,12 @@
 		var startLeft = container.scrollLeft;
 		var startTop = container.scrollTop;
 
-		if (this.useCssTransforms)
+		if (this.chromeless)
 		{
-			Graph.applyTransformTransition(this, duration);
+			var scale = this.view.scale;
+			var translate = this.view.translate.clone();
 			this.fitBoundsCssTransform(bounds, border);
+			this.transitionViewState(scale, translate, duration);
 		}
 		else
 		{
@@ -10572,13 +10743,12 @@
 		}
 
 		// Capture target scroll set by fitBoundsCssTransform / fitWindow,
-		// then animate from start → target in parallel with the CSS
-		// transform transition (chromeless) or with the snapped zoom
-		// (editor).
+		// then animate from start → target in parallel with the canvas
+		// transition (chromeless) or with the snapped zoom (editor).
 		Graph.smoothScrollContainer(container, startLeft, startTop,
 			container.scrollLeft, container.scrollTop, duration);
 
-		// The scroll tween and the CSS transform transition both run for
+		// The scroll tween and the canvas transition both run for
 		// `duration` ms, so the transition is complete after `duration`.
 		if (done != null)
 		{
@@ -10608,7 +10778,7 @@
 
 		if (state == null) return;
 
-		var gb = this.view.graphBounds;
+		var gb = this.view.getModelGraphBounds();
 		var s = this.view.scale;
 
 		// Normalize translate (no scale change). `scaleAndTranslate`
@@ -10620,9 +10790,8 @@
 			this.view.scaleAndTranslate(s, -gb.x, -gb.y);
 		}
 
-		// state.x/y/w/h are in graph coords (validate runs at scale=1,
-		// translate=0 in useCssTransforms mode). With translate now
-		// `-gb`, screen position of graph (gx, gy) = `(gx - gb.x) * s`.
+		// With translate now `-gb`, the screen position of the cell state,
+		// `(gx + translate) * s`, is `(gx - gb.x) * s` for graph (gx, gy).
 		var cw = this.container.clientWidth;
 		var ch = this.container.clientHeight;
 
@@ -10637,10 +10806,10 @@
 			// Bring the cell into view with `border` px of breathing room
 			// on every side, scrolling the minimum needed instead of
 			// centring. `border` is in screen px (like the viewbox border).
-			var cellLeft = (state.x - gb.x) * s;
-			var cellTop = (state.y - gb.y) * s;
-			var cellRight = (state.x + state.width - gb.x) * s;
-			var cellBottom = (state.y + state.height - gb.y) * s;
+			var cellLeft = state.x;
+			var cellTop = state.y;
+			var cellRight = state.x + state.width;
+			var cellBottom = state.y + state.height;
 
 			left = this.container.scrollLeft;
 			top = this.container.scrollTop;
@@ -10666,8 +10835,8 @@
 		else
 		{
 			// Centre the cell (default behaviour).
-			left = (state.x + state.width / 2 - gb.x) * s - cw / 2;
-			top = (state.y + state.height / 2 - gb.y) * s - ch / 2;
+			left = state.getCenterX() - cw / 2;
+			top = state.getCenterY() - ch / 2;
 		}
 
 		this.container.scrollLeft = (maxLeft < 0) ? 0 :
@@ -10733,7 +10902,7 @@
 		var startLeft = container.scrollLeft;
 		var startTop = container.scrollTop;
 
-		if (this.useCssTransforms)
+		if (this.chromeless)
 		{
 			this.scrollCellToVisibleCssTransform(cell, border);
 		}
@@ -10975,6 +11144,12 @@
 	 * When adding new actions that reference cell IDs support for updating
 	 * those cell IDs must be handled in Graph.updateCustomLinkActions
 	 */
+	/**
+	 * Hook for selecting the next or previous page with wrap around in the
+	 * page custom action. This implementation does nothing.
+	 */
+	Graph.prototype.selectNextPage = function(forward) { };
+
 	Graph.prototype.executeCustomActions = function(actions, done, cell)
 	{
 		if (!this.executingCustomActions)
@@ -11133,6 +11308,13 @@
 						{
 							this.openLink(action.open);
 						}
+					}
+
+					// Selects the next or previous page with wrap around
+					if (action.page == 'next' || action.page == 'previous')
+					{
+						endUpdate();
+						this.selectNextPage(action.page == 'next');
 					}
 
 					if (action.wait != null && !stop)
@@ -11384,13 +11566,10 @@
 
 							if (vbBounds != null)
 							{
-								// State bounds are screen coords in the editor
-								// but graph coords in useCssTransforms mode
-								// (validate runs at scale 1, translate 0) —
-								// same normalization as fitDiagramToWindow.
-								var vbScale = (this.useCssTransforms) ? 1 : this.view.scale;
-								var vbTrans = (this.useCssTransforms) ?
-									new mxPoint(0, 0) : this.view.translate;
+								// State bounds are screen coords — same
+								// normalization as fitDiagramToWindow.
+								var vbScale = this.view.scale;
+								var vbTrans = this.view.translate;
 
 								// Dynamic border is breathing room per side
 								// (screen px, like scroll's border). The fit
@@ -11426,7 +11605,7 @@
 								waitCounter++;
 								this.smoothFitWindow(vb, vb.border, waitAndExecute);
 							}
-							else if (this.useCssTransforms)
+							else if (this.chromeless)
 							{
 								// Regular fitWindow only zooms in chromeless mode
 								// (no scrollbars to pan), so we recreate the pan
@@ -11461,14 +11640,13 @@
 							waitCounter++;
 							this.smoothScrollCellToVisible(cells[0], scrollBorder, waitAndExecute);
 						}
-						else if (this.useCssTransforms)
+						else if (this.chromeless)
 						{
-							// Chromeless: use the CSS-transforms-aware
-							// helper that updates view.translate AND
-							// calls sizeDidChange (so the SVG element
-							// resizes to fit the panned region — without
-							// this the cell scrolls off-screen at
-							// high-zoom levels).
+							// Chromeless: use the helper that updates
+							// view.translate AND calls sizeDidChange (so
+							// the SVG element resizes to fit the panned
+							// region — without this the cell scrolls
+							// off-screen at high-zoom levels).
 							this.scrollCellToVisibleCssTransform(cells[0], scrollBorder);
 						}
 						else
@@ -11535,7 +11713,7 @@
 							this.setHiddenTags(hidden);
 						}
 
-						this.refresh();
+						this.refreshHiddenTags();
 					}
 
 					if (animations.length > 0)
@@ -11950,6 +12128,18 @@
 	{
 		this.hiddenTags = tags;
 		this.fireEvent(new mxEventObject('hiddenTagsChanged'));
+	};
+
+	/**
+	 * Updates the view after the hidden tags changed. Unlike <refresh>, this
+	 * only creates and removes the states of the cells whose visibility
+	 * changed instead of repainting all cells.
+	 */
+	Graph.prototype.refreshHiddenTags = function()
+	{
+		this.view.revalidate();
+		this.sizeDidChange();
+		this.fireEvent(new mxEventObject(mxEvent.REFRESH));
 	};
 
 	/**
@@ -12393,18 +12583,36 @@
 		{
 			if (visible)
 			{
+				// Keeps the shadow in screen pixels if the draw pane is scaled
+				var s = (this.view.modelCoordinates &&
+					elt == this.view.getDrawPane()) ? this.view.scale : 1;
 				var cssColor = mxUtils.getLightDarkColor(
 					this.svgShadowColor, this.svgShadowOpacity);
 				elt.style.filter = 'drop-shadow(' +
-					Math.round(this.svgShadowSize * 100) / 100 + 'px ' +
-					Math.round(this.svgShadowSize * 100) / 100 + 'px ' +
-					Math.round(this.svgShadowBlur * 100) / 100 + 'px ' +
+					Math.round(this.svgShadowSize / s * 100) / 100 + 'px ' +
+					Math.round(this.svgShadowSize / s * 100) / 100 + 'px ' +
+					Math.round(this.svgShadowBlur / s * 100) / 100 + 'px ' +
 					cssColor.cssText + ')'
 			}
 			else
 			{
 				elt.style.filter = '';
 			}
+		}
+	};
+
+	/**
+	 * Updates the shadow for the scale of the draw pane in model coordinates.
+	 */
+	var mxGraphViewUpdateDrawPaneTransform = mxGraphView.prototype.updateDrawPaneTransform;
+	mxGraphView.prototype.updateDrawPaneTransform = function()
+	{
+		mxGraphViewUpdateDrawPaneTransform.apply(this, arguments);
+
+		if (this.graph.shadowVisible && this.shadowScale != this.scale)
+		{
+			this.shadowScale = this.scale;
+			this.graph.updateShadowFilter(this.getDrawPane(), true);
 		}
 	};
 
