@@ -173,6 +173,42 @@ RenamePage.prototype.execute = function()
 };
 
 /**
+ * Undoable change of the ID of a page. The caller checks that the ID is not
+ * used by another page.
+ */
+function ChangePageId(ui, page, id)
+{
+	this.ui = ui;
+	this.page = page;
+	this.previous = id;
+}
+
+/**
+ * Implementation of the undoable page ID change. Keeps the ID if another page
+ * has taken the new ID in the meantime, eg. in a remote change.
+ */
+ChangePageId.prototype.execute = function()
+{
+	var tmp = this.page.getId();
+	var page = this.ui.getPageById(this.previous);
+
+	if (page == null || page == this.page)
+	{
+		this.page.node.setAttribute('id', this.previous);
+	}
+
+	this.previous = tmp;
+
+	// Updates the ID in the tooltip of the tab and in the URL
+	this.ui.updateTabContainer();
+
+	if (this.page == this.ui.currentPage)
+	{
+		this.ui.updateHashObject();
+	}
+};
+
+/**
  * Undoable change of a page's stored initial view (see DiagramPage.getViewBox).
  */
 function ChangePageView(ui, page, viewBox)
@@ -211,7 +247,14 @@ function MovePage(ui, oldIndex, newIndex)
  */
 MovePage.prototype.execute = function()
 {
-	this.ui.pages.splice(this.newIndex, 0, this.ui.pages.splice(this.oldIndex, 1)[0]);
+	var pages = this.ui.pages;
+
+	// Moving a page that does not exist would insert an undefined page
+	if (pages != null && this.oldIndex >= 0 && this.oldIndex < pages.length)
+	{
+		pages.splice(this.newIndex, 0, pages.splice(this.oldIndex, 1)[0]);
+	}
+
 	var tmp = this.oldIndex;
 	this.oldIndex = this.newIndex;
 	this.newIndex = tmp;
@@ -519,6 +562,24 @@ ChangePage.prototype.execute = function()
 		this.repairExecuted = true;
 	};
 
+	var changePageIdExecute = ChangePageId.prototype.execute;
+
+	ChangePageId.prototype.execute = function()
+	{
+		if (this.repairExecuted)
+		{
+			var canonical = canonicalPage(this.ui, this.page);
+
+			if (canonical != null)
+			{
+				this.page = canonical;
+			}
+		}
+
+		changePageIdExecute.apply(this, arguments);
+		this.repairExecuted = true;
+	};
+
 	var changePageViewExecute = ChangePageView.prototype.execute;
 
 	ChangePageView.prototype.execute = function()
@@ -659,6 +720,14 @@ EditorUi.prototype.getSelectedPageIndex = function()
 	 return result;
  };
  
+/**
+ * Changes the ID of the given page with an undoable change.
+ */
+EditorUi.prototype.setPageId = function(page, id)
+{
+	this.editor.graph.model.execute(new ChangePageId(this, page, id));
+};
+
 /**
  * Returns the page with the given ID from the optional array of pages.
  */
@@ -1430,28 +1499,159 @@ EditorUi.prototype.getDiagramSnapshot = function()
 };
 
 /**
- * 
+ * Applies the given XML node to the page of the given snapshot as a diff,
+ * so that the page and the model keep the same root. Whole files (eg. from
+ * generators or a file dropped on the Edit Diagram dialog), single pages
+ * and compressed, SVG or HTML data are unwrapped: the first page replaces
+ * the page of the snapshot and further pages are added after it. Throws
+ * for anything else, which would otherwise decode as an empty page.
  */
 EditorUi.prototype.updateDiagramData = function(snapshot, node)
 {
-	if (this.getPageIndex(snapshot.page) == null)
-	{
-		this.insertPage(null, null, node);
-	}
-	else
-	{
-		var dec = new mxCodec(snapshot.node.ownerDocument);
-		var oldModel = new mxGraphModel();
-		dec.decode(snapshot.node, oldModel);
+	var diagrams = null;
 
-		dec = new mxCodec(node.ownerDocument);
-		var newModel = new mxGraphModel();
-		dec.decode(node, newModel);
-
-		this.selectPage(snapshot.page);
-		var patch = this.diffCells(oldModel.root, newModel.root);
-		this.patchPage(snapshot.page, patch, null, true);
+	if (node != null && node.nodeName == 'diagram')
+	{
+		diagrams = [node];
 	}
+	else if (node != null && node.nodeName != 'mxGraphModel' &&
+		node.nodeName != 'root')
+	{
+		node = this.editor.extractGraphModel(node, true, true);
+
+		if (node != null && node.nodeName == 'mxfile')
+		{
+			var children = mxUtils.getChildNodes(node);
+			diagrams = [];
+
+			for (var i = 0; i < children.length; i++)
+			{
+				if (children[i].nodeName == 'diagram')
+				{
+					diagrams.push(children[i]);
+				}
+			}
+		}
+	}
+
+	if (diagrams != null)
+	{
+		node = (diagrams.length > 0) ? Editor.parseDiagramNode(diagrams[0], true) : null;
+	}
+
+	if (node != null && node.nodeName == 'root')
+	{
+		var wrapper = node.ownerDocument.createElement('mxGraphModel');
+		wrapper.appendChild(node);
+		node = wrapper;
+	}
+
+	// Cells outside of a root element are ignored by the codec
+	var hasRoot = false;
+
+	if (node != null && node.nodeName == 'mxGraphModel')
+	{
+		var children = mxUtils.getChildNodes(node);
+
+		for (var i = 0; i < children.length && !hasRoot; i++)
+		{
+			hasRoot = children[i].nodeName == 'root';
+		}
+	}
+
+	if (!hasRoot)
+	{
+		throw new Error(mxResources.get('notADiagramFile'));
+	}
+
+	// Parses further pages before anything is changed
+	var newPages = [];
+	var oldIds = [];
+
+	for (var i = 1; diagrams != null && i < diagrams.length; i++)
+	{
+		oldIds.push(diagrams[i].getAttribute('id'));
+		diagrams[i].removeAttribute('id');
+		newPages.push(this.updatePageRoot(new DiagramPage(diagrams[i])));
+	}
+
+	var graph = this.editor.graph;
+	var page = snapshot.page;
+
+	if (this.getPageIndex(page) != null)
+	{
+		this.selectPage(page);
+	}
+
+	graph.model.beginUpdate();
+	try
+	{
+		if (this.getPageIndex(page) == null)
+		{
+			page = this.insertPage(null, null, node);
+		}
+		else
+		{
+			var dec = new mxCodec(snapshot.node.ownerDocument);
+			var oldModel = new mxGraphModel();
+			dec.decode(snapshot.node, oldModel);
+
+			dec = new mxCodec(node.ownerDocument);
+			var newModel = new mxGraphModel();
+			dec.decode(node, newModel);
+
+			var patch = this.diffCells(oldModel.root, newModel.root);
+			this.patchPage(page, patch, null, true);
+		}
+
+		if (page != null && newPages.length > 0)
+		{
+			this.insertDiagramPages(page, diagrams[0].getAttribute('id'),
+				newPages, oldIds);
+		}
+	}
+	finally
+	{
+		graph.model.endUpdate();
+	}
+};
+
+/**
+ * Inserts the given new pages after the given page, which holds the first
+ * page of a file, and updates the links to the pages of the file from
+ * their IDs in the file (oldId, oldIds) to the IDs of the pages. Links to
+ * existing pages are kept.
+ */
+EditorUi.prototype.insertDiagramPages = function(page, oldId, newPages, oldIds)
+{
+	var graph = this.editor.graph;
+	var index = this.getPageIndex(page);
+
+	// Null prototype as the IDs are user data
+	var mapping = this.addLocalPagesToMapping(Object.create(null));
+
+	if (oldId != null)
+	{
+		mapping[oldId] = page.getId();
+	}
+
+	for (var i = 0; i < newPages.length; i++)
+	{
+		if (oldIds[i] != null)
+		{
+			mapping[oldIds[i]] = newPages[i].getId();
+		}
+
+		if (newPages[i].getName() == null)
+		{
+			newPages[i].setName(this.createPageName());
+		}
+
+		graph.model.execute(new ChangePage(this,
+			newPages[i], newPages[i], ++index, true));
+	}
+
+	this.updatePageLinks(mapping, [page].concat(newPages));
 };
 
 /**
@@ -1876,7 +2076,12 @@ EditorUi.prototype.renamePage = function(page)
  */
 EditorUi.prototype.movePage = function(oldIndex, newIndex)
 {
-	this.editor.graph.model.execute(new MovePage(this, oldIndex, newIndex));
+	// Ignores stale indices, eg. from a menu that was opened before a
+	// merge removed pages, so that no change is added to the history
+	if (this.pages != null && oldIndex >= 0 && oldIndex < this.pages.length)
+	{
+		this.editor.graph.model.execute(new MovePage(this, oldIndex, newIndex));
+	}
 }
 
 /**

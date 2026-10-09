@@ -86,9 +86,10 @@
 	 * matching what mxHierarchicalLayout did via
 	 * intraCellSpacing / interRankCellSpacing / parallelEdgeSpacing.
 	 *
-	 * The two tree keys (verticaltree / horizontaltree) still live in
-	 * doImportCsv on mxCompactTreeLayout — ELK's mrtree output didn't
-	 * match the legacy look closely enough.
+	 * verticaltree / horizontaltree (formerly mxCompactTreeLayout) and
+	 * organic (formerly mxFastOrganicLayout) keep the edges as they are
+	 * (`edgeStyle: 'keep'`), like the old layouts, which only moved the
+	 * cells, and the shape sizes for the same reasons as the flows.
 	 */
 	EditorUi.CSV_ELK_LAYOUTS = {
 		'verticalflow':   {layout: 'elkLayered', config: {
@@ -111,6 +112,26 @@
 			includeEdgeLabels: false,
 			includeVertexLabels: false,
 			portSpread: true,
+			resizeNodes: false
+		}},
+		'verticaltree':   {layout: 'elkTree', config: {
+			'elk.direction': 'DOWN',
+			edgeStyle: 'keep',
+			includeEdgeLabels: false,
+			includeVertexLabels: false,
+			resizeNodes: false
+		}},
+		'horizontaltree': {layout: 'elkTree', config: {
+			'elk.direction': 'RIGHT',
+			edgeStyle: 'keep',
+			includeEdgeLabels: false,
+			includeVertexLabels: false,
+			resizeNodes: false
+		}},
+		'organic': {layout: 'elkOrganic', config: {
+			edgeStyle: 'keep',
+			includeEdgeLabels: false,
+			includeVertexLabels: false,
 			resizeNodes: false
 		}},
 		'elkRadial':  {layout: 'elkRadial',  config: {edgeStyle: 'elkCompat'}},
@@ -3266,6 +3287,12 @@
 					var hashObj = this.getHashObject();
 					// this.fileStats(file, node);
 					var selectedPage = null;
+
+					// Links have the page ID URI encoded, older links and
+					// the lightbox and presentation mode have it raw
+					var urlPageId = (urlParams['page-id'] != null) ?
+						mxUtils.safeDecodeURIComponent(urlParams['page-id']) : null;
+
 					this.fileNode = node;
 					this.editor.graph.defaultExportLinkTarget = node.getAttribute('linkTarget');
 					this.pages = [];
@@ -3291,7 +3318,8 @@
 						this.pages.push(page);
 						
 						if ((hashObj.pageId == null && urlParams['page-id'] != null &&
-								page.getId() == urlParams['page-id']) ||
+								(page.getId() == urlParams['page-id'] ||
+								page.getId() == urlPageId)) ||
 							(hashObj.pageId != null && page.getId() == hashObj.pageId))
 						{
 							selectedPage = page;
@@ -4296,7 +4324,7 @@
 											curr = curr.clone();
 											
 											// Partially overwrites geometry
-											for (key in geo)
+											for (var key in geo)
 											{
 												var val = parseFloat(geo[key]);
 												
@@ -8855,7 +8883,7 @@
 		
 		// Replaces alternate content with image of text
 		var switches = root.getElementsByTagName('switch');
-		counter = switches.length;
+		var counter = switches.length;
 
 		var done = mxUtils.bind(this, function()
 		{
@@ -9536,7 +9564,7 @@
 
 		if (linkPage != null && typeof linkPage.getId === 'function')
 		{
-			params.push('page-id=' + linkPage.getId());
+			params.push('page-id=' + encodeURIComponent(linkPage.getId()));
 		}
 
 		if (transparent)
@@ -9560,7 +9588,22 @@
 			EditorUi.drawHost : 'https://' + window.location.host))) + '/' +
 			((params.length > 0) ? '?' + params.join('&') : '') + data;
 	};
-	
+
+	/**
+	 * Returns the given URL for a double quoted attribute in a snippet that
+	 * users copy, eg. the src of an iframe. Percent-encodes the characters
+	 * that cannot be in a valid URL but could end the attribute or start a
+	 * tag. Unlike htmlEntities this leaves valid URLs unchanged, so a src
+	 * that is copied out of the snippet does not contain &amp;.
+	 */
+	EditorUi.encodeAttributeUrl = function(url)
+	{
+		return String(url).replace(/["<>]/g, function(c)
+		{
+			return encodeURIComponent(c);
+		});
+	};
+
 	/**
 	 * 
 	 */
@@ -12842,9 +12885,10 @@
 	};
 	
 	/**
-	 * Returns true for VSD, VDX, VST and VSS, VSX files.
+	 * Returns true for the Visio formats before Visio 2013: VSD, VST and VSS
+	 * (binary) and VDX, VSX (Visio 2003-2010 XML).
 	 */
-	EditorUi.prototype.isRemoteVisioFormat = function(filename)
+	EditorUi.prototype.isLegacyVisioFormat = function(filename)
 	{
 		return (/(\.v(sd|dx|st))($|\?)/i.test(filename) ||
 			/(\.vs(s|x))($|\?)/i.test(filename));
@@ -12854,14 +12898,14 @@
 	 * Converts a binary Visio file (.vsd, .vss, .vst of any Visio version)
 	 * to Visio XML in the browser using drawio-vsd (window.DrawioVsd). Calls
 	 * success with a Blob of the .vsdx, .vssx or .vstx package and its
-	 * file name, or fallback if the converter is not loaded, the data is not
+	 * file name, or error if the converter is not loaded, the data is not
 	 * a binary Visio file (e.g. .vdx) or the conversion fails.
 	 */
-	EditorUi.prototype.convertBinaryVisio = function(file, filename, success, fallback)
+	EditorUi.prototype.convertBinaryVisio = function(file, filename, success, error)
 	{
 		if (typeof DrawioVsd === 'undefined' || typeof FileReader === 'undefined')
 		{
-			fallback();
+			error();
 		}
 		else
 		{
@@ -12882,7 +12926,7 @@
 				}
 				catch (e)
 				{
-					// Malformed or unsupported: the conversion service may still read it
+					// Malformed or unsupported
 					result = null;
 				}
 
@@ -12893,13 +12937,13 @@
 				}
 				else
 				{
-					fallback();
+					error();
 				}
 			});
 
 			reader.onerror = function()
 			{
-				fallback();
+				error();
 			};
 
 			reader.readAsArrayBuffer(file);
@@ -12909,7 +12953,7 @@
 	/**
 	 * Imports the given Visio file
 	 */
-	EditorUi.prototype.importVisio = function(file, done, error, filename, customParam)
+	EditorUi.prototype.importVisio = function(file, done, error, filename)
 	{
 		var onerror = mxUtils.bind(this, function(e)
 		{
@@ -12944,7 +12988,7 @@
 
 				if (this.doImportVisio)
 				{
-					var remote = this.isRemoteVisioFormat(filename);
+					var legacy = this.isLegacyVisioFormat(filename);
 					
 					try
 					{
@@ -12967,130 +13011,17 @@
 						
 						// EditorUi.logEvent({category: ext + '-MS-IMPORT-FILE',
 						// 	action: 'filename_' + filename,
-						// 	label: (remote) ? 'remote' : 'local'});
+						// 	label: (legacy) ? 'legacy' : 'local'});
 					}
 					catch (e)
 					{
 						// ignore
 					}
 					
-					// Binary Visio files (.vsd, .vss, .vst) are converted in the browser
-					// (drawio-vsd); the conversion service remains the fallback for other
-					// formats (.vdx) and for files the converter cannot read
-					var remoteImport = mxUtils.bind(this, function()
-					{
-						if (VSS_CONVERT_URL != null && !this.isOffline())
-						{
-							var formData = new FormData();
-							formData.append('file1', file, filename);
-		
-							var xhr = new XMLHttpRequest();
-							xhr.open('POST', VSS_CONVERT_URL + (/(\.vss|\.vsx)$/.test(filename)? '?stencil=1' : ''));
-							xhr.responseType = 'blob';
-							this.addRemoteServiceSecurityCheck(xhr);
-							
-							if (customParam != null)
-							{
-								xhr.setRequestHeader('x-convert-custom', customParam);
-							}
-							
-							xhr.onreadystatechange = mxUtils.bind(this, function()
-							{
-								if (xhr.readyState == 4 && timeout.clear())
-								{
-									if (xhr.status >= 200 && xhr.status <= 299)
-									{
-										try
-										{
-											var resp = xhr.response;
-
-											if (resp.type == 'text/xml')
-											{
-												var reader = new FileReader();
-												
-												reader.onload = mxUtils.bind(this, function(e)
-												{
-													try
-													{
-														done(e.target.result);
-													}
-													catch (e)
-													{
-														handleError({message: mxResources.get('errorLoadingFile')});
-													}
-												});
-						
-												reader.readAsText(resp);
-											}
-											else
-											{
-												this.doImportVisio(resp, done, handleError, filename);
-											}
-										}
-										catch (e)
-										{
-											handleError(e);
-										}
-									}
-									else
-									{
-										try
-										{
-											if (xhr.responseType == '' || xhr.responseType == 'text')
-											{
-												handleError({message: xhr.responseText});
-											}
-											else
-											{
-												var reader = new FileReader();
-
-												reader.onload = function() 
-												{
-													try
-													{	
-														handleError({message: JSON.parse(reader.result).Message});
-													}
-													catch (e)
-													{
-														if (reader.result != null && reader.result.length > 0)
-														{	
-															handleError({message: reader.result});
-														}
-														else
-														{
-															handleError(e);
-														}
-													}
-												}
-
-												reader.readAsText(xhr.response);
-											}
-										}
-										catch(e)
-										{
-											handleError({});
-										}
-									}
-								}
-							});
-							
-							xhr.send(formData);
-						}
-						else
-						{
-							if (/(\.vss|\.vsx)$/i.test(filename))
-							{
-								handleError({message: mxResources.get('tryVssDraw', ['https://vss.draw.io'])});
-							}
-							else
-							{
-								handleError({message: this.getServiceName() != 'draw.io'? mxResources.get('vsdNoConfig') :
-									mxResources.get('serviceUnavailableOrBlocked')});
-							}
-						}
-					});
-
-					if (remote)
+					// Binary Visio files (.vsd, .vss, .vst) are converted to Visio XML in
+					// the browser (drawio-vsd); Visio 2003-2010 XML (.vdx, .vsx) is not
+					// supported
+					if (legacy)
 					{
 						this.convertBinaryVisio(file, filename, mxUtils.bind(this, function(blob, name)
 						{
@@ -13105,7 +13036,10 @@
 									handleError(e);
 								}
 							}
-						}), remoteImport);
+						}), function()
+						{
+							handleError({message: mxResources.get('unsupportedFormat')});
+						});
 					}
 					else if (timeout.clear())
 					{
@@ -14105,7 +14039,7 @@
 								try
 								{
 									response = JSON.parse(response);
-									result = response.result;
+									var result = response.result;
 								}
 								catch (e)
 								{
@@ -16270,106 +16204,97 @@
 													}
 													else
 													{
-														// SVG needs special handling to add viewbox if missing and
-														// find initial size from SVG attributes (only for IE11)
-														barrier(index, mxUtils.bind(this, function()
+														// Finds the size from the width and height or the viewBox
+														// of the SVG and adds a viewBox if it is missing
+														var w = svgRoot.getAttribute('width');
+														var h = svgRoot.getAttribute('height');
+
+														if (w != null && w.charAt(w.length - 1) != '%')
 														{
-															try
+															w = parseFloat(w);
+														}
+														else
+														{
+															w = NaN;
+														}
+
+														if (h != null && h.charAt(h.length - 1) != '%')
+														{
+															h = parseFloat(h);
+														}
+														else
+														{
+															h = NaN;
+														}
+
+														var vb = svgRoot.getAttribute('viewBox');
+														var addViewBox = vb == null || vb.length == 0;
+
+														// Uses width and height from viewbox for
+														// missing width and height attributes
+														if (!addViewBox && (isNaN(w) || isNaN(h)))
+														{
+															var tokens = vb.split(' ');
+
+															if (tokens.length > 3)
 															{
-																// Parses SVG and find width and height
-																if (root != null)
+																w = parseFloat(tokens[2]);
+																h = parseFloat(tokens[3]);
+															}
+														}
+
+														var insertSvg = mxUtils.bind(this, function(w, h)
+														{
+															if (addViewBox)
+															{
+																svgRoot.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+															}
+
+															barrier(index, mxUtils.bind(this, function()
+															{
+																try
 																{
-																	var svgs = root.getElementsByTagName('svg');
-																	
-																	if (svgs.length > 0)
-																	{
-																		var svgRoot = svgs[0];
-																		var w = svgRoot.getAttribute('width');
-																		var h = svgRoot.getAttribute('height');
-																		
-																		if (w != null && w.charAt(w.length - 1) != '%')
-																		{
-																			w = parseFloat(w);
-																		}
-																		else
-																		{
-																			w = NaN;
-																		}
-																		
-																		if (h != null && h.charAt(h.length - 1) != '%')
-																		{
-																			h = parseFloat(h);
-																		}
-																		else
-																		{
-																			h = NaN;
-																		}
-																		
-																		// Check if viewBox attribute already exists
-																		var vb = svgRoot.getAttribute('viewBox');
-																		
-																		if (vb == null || vb.length == 0)
-																		{
-																			svgRoot.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-																		}
-																		// Uses width and height from viewbox for
-																		// missing width and height attributes
-																		else if (isNaN(w) || isNaN(h))
-																		{
-																			var tokens = vb.split(' ');
-																			
-																			if (tokens.length > 3)
-																			{
-																				w = parseFloat(tokens[2]);
-																				h = parseFloat(tokens[3]);
-																			}
-																		}
-		
-																		data = Editor.createSvgDataUri(mxUtils.getXml(svgRoot));
-																		var s = Math.min(1, Math.min(maxSize / Math.max(1, w)), maxSize / Math.max(1, h));
-																		var cells = fn(data, file.type, x + index * gs, y + index * gs, Math.max(
-																			1, Math.round(w * s)), Math.max(1, Math.round(h * s)), file.name);
-																		
-																		// Hack to fix width and height asynchronously
-																		if (cells != null && (isNaN(w) || isNaN(h)))
-																		{
-																			var img = new Image();
-																			
-																			img.onload = mxUtils.bind(this, function()
-																			{
-																				w = Math.max(1, img.width);
-																				h = Math.max(1, img.height);
-																				
-																				cells[0].geometry.width = w;
-																				cells[0].geometry.height = h;
-																				
-																				svgRoot.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-																				data = Editor.createSvgDataUri(mxUtils.getXml(svgRoot));
-																				
-																				var semi = data.indexOf(';');
-																				
-																				if (semi > 0)
-																				{
-																					data = data.substring(0, semi) + data.substring(data.indexOf(',', semi + 1));
-																				}
-																				
-																				graph.setCellStyles('image', data, [cells[0]]);
-																			});
-																			
-																			img.src = Editor.createSvgDataUri(mxUtils.getXml(svgRoot));
-																		}
-																		
-																		return cells;
-																	}
+																	var s = Math.min(1, Math.min(maxSize / Math.max(1, w)), maxSize / Math.max(1, h));
+
+																	return fn(Editor.createSvgDataUri(mxUtils.getXml(svgRoot)),
+																		file.type, x + index * gs, y + index * gs, Math.max(
+																		1, Math.round(w * s)), Math.max(1, Math.round(h * s)), file.name);
 																}
-															}
-															catch (e)
+																catch (e)
+																{
+																	// ignores any SVG parsing errors
+																}
+
+																return null;
+															}));
+														});
+
+														// Uses the size of the image if the SVG has no size
+														if (isNaN(w) || isNaN(h))
+														{
+															var img = new Image();
+
+															img.onload = function()
 															{
-																// ignores any SVG parsing errors
-															}
-															
-															return null;
-														}));
+																insertSvg(Math.max(1, img.width), Math.max(1, img.height));
+															};
+
+															img.onerror = mxUtils.bind(this, function()
+															{
+																barrier(index, function()
+																{
+																	return null;
+																});
+
+																this.handleError({message: mxResources.get('invalidOrMissingFile')});
+															});
+
+															img.src = Editor.createSvgDataUri(mxUtils.getXml(svgRoot));
+														}
+														else
+														{
+															insertSvg(w, h);
+														}
 													}
 												}
 												else
@@ -17177,6 +17102,21 @@
 		return model.getCell(id);
 	};
 
+	// A cell outside of every tree at the first execution of a change
+	// (no page and no content root, eg. a cell built through the model
+	// before it is inserted) has no identity in the document, but its id
+	// can be that of a live cell: the CSV import gave the data cell of an
+	// updated row the id of the updated cell, and the undo wrote the data
+	// cell's old value onto it. Replays of such a change use the recorded
+	// objects instead of resolving them by id (undo-stale case 18).
+	var repairIsDetached = function(model, cell, context)
+	{
+		var root = repairRootOf(cell);
+
+		return context == null && root != model.root &&
+			(root == cell || root.isVertex() || root.isEdge());
+	};
+
 	// Transient repair points are re-applied AFTER the whole edit
 	// replay: a sibling geometry replay of the same composite edit
 	// (eg. the drag-disconnect that stored the drop point) restores
@@ -17287,6 +17227,8 @@
 			if (firstRun)
 			{
 				this.repairPage = repairCapturePage(this.model, this.cell);
+				this.repairDetached = repairIsDetached(this.model,
+					this.cell, this.repairPage);
 			}
 			else if (this.repairPage != null &&
 				repairCurrentPage(this.model, this.repairPage) == null)
@@ -17296,7 +17238,7 @@
 				return;
 			}
 
-			if (!firstRun)
+			if (!firstRun && !this.repairDetached)
 			{
 				// The edge itself is resolved fresh too, for the same
 				// reason as its terminal: a save merge can replace the
@@ -17316,7 +17258,11 @@
 				var slot = this.repairIntent.next;
 				var wantId = this.repairIntent.ids[slot];
 
-				if (wantId == null)
+				if (this.repairDetached)
+				{
+					this.previous = this.repairIntent.objs[slot];
+				}
+				else if (wantId == null)
 				{
 					this.previous = null;
 				}
@@ -17467,6 +17413,8 @@
 				if (firstRun)
 				{
 					this.repairPage = repairCapturePage(this.model, this.cell);
+					this.repairDetached = repairIsDetached(this.model,
+						this.cell, this.repairPage);
 				}
 				else if (this.repairPage != null &&
 					repairCurrentPage(this.model, this.repairPage) == null)
@@ -17475,7 +17423,7 @@
 					return;
 				}
 
-				if (!firstRun)
+				if (!firstRun && !this.repairDetached)
 				{
 					// The changed cell itself is resolved fresh, as it
 					// already is for mxChildChange: a save merge can
@@ -23734,6 +23682,24 @@
 					mxSettings.settings.enableAnimations = Editor.enableAnimations;
 					mxSettings.save();
 				}));
+
+				/**
+				 * Persists mouse wheel zoom switch except in passive scroll
+				 * mode where the mouse wheel scrolls the host page.
+				 */
+				if (!Editor.passiveScroll)
+				{
+					if (mxSettings.settings.zoomWheel != null)
+					{
+						Graph.zoomWheel = mxSettings.settings.zoomWheel;
+					}
+
+					this.addListener('zoomWheelChanged', mxUtils.bind(this, function(sender, evt)
+					{
+						mxSettings.settings.zoomWheel = Graph.zoomWheel;
+						mxSettings.save();
+					}));
+				}
 			}
 			
 			if (this.sidebar != null)
@@ -23825,7 +23791,8 @@
 	 */
 	EditorUi.prototype.writeTextToClipboard = function(text, error, done)
 	{
-		navigator.clipboard.writeText(text).then(function()
+		// Some browsers return no promise
+		Promise.resolve(navigator.clipboard.writeText(text)).then(function()
 		{
 			if (done != null)
 			{
@@ -24002,7 +23969,14 @@
 				cells = mxUtils.sortCells(graph.getExportableCells(
 					graph.model.getTopmostCells(cells)));
 				var xml = mxUtils.getXml(graph.encodeCells(cells));
-				navigator.clipboard.writeText(xml);
+
+				// Some browsers return no promise. A refused write (eg. no clipboard
+				// permission in an iframe) leaves the local clipboard, which cut and
+				// copy also fill and paste falls back to.
+				Promise.resolve(navigator.clipboard.writeText(xml))['catch'](function(e)
+				{
+					EditorUi.debug('EditorUi.copyXml', 'clipboard write refused', e);
+				});
 			}
 		}
 		
@@ -24962,7 +24936,7 @@
 			elt = document.createElement('div');
 			elt.innerHTML = ((hasMeta) ? '<meta charset="utf-8">' : '') +
 				Graph.sanitizeHtml(data);
-			asHtml = true;
+			var asHtml = true;
 
 			// Workaround for innerText not ignoring style elements in Chrome
 			var styles = elt.getElementsByTagName('style');
@@ -25015,7 +24989,7 @@
 						}
 						else if (temp.substring(0, 26) == 'data:image/svg+xml;base64,')
 						{
-							img = this.base64ToBlob(temp.substring(temp.indexOf(',') + 1), 'image/svg+xml');
+							var img = this.base64ToBlob(temp.substring(temp.indexOf(',') + 1), 'image/svg+xml');
 							var svg = Graph.getSvgFromDataUri(temp);
 
 							try
@@ -26116,12 +26090,17 @@
 
 			if (name == null && this.getCurrentFile() != null && this.isDiagramEmpty())
 			{
-				var doc = mxUtils.parseXml(data);
-
-				if (doc != null)
+				// Updates the page rather than only the model, which
+				// realtime files do not save (jgraph/drawio#5795)
+				try
 				{
-					this.editor.setGraphXml(doc.documentElement);
+					this.updateDiagramData(this.getDiagramSnapshot(),
+						mxUtils.parseXml(data).documentElement);
 					this.editor.graph.selectAll();
+				}
+				catch (e)
+				{
+					this.handleError(e);
 				}
 			}
 			else
@@ -26396,19 +26375,54 @@
 							var graph = this.editor.graph;
 							graph.setGridEnabled(false);
 							graph.pageVisible = false;
-							var cells = graph.model.cells;
+							var pages = (this.pages != null) ? this.pages : [null];
 							
-							//Add sketch style and font to all cells
-							for (var id in cells)
+							// Adds sketch style and font to all cells of all pages. Changes the
+							// cells directly as this is part of loading the diagram: the undo
+							// history and modified flag are reset below and the autosave and
+							// diff sync baselines are taken after this handler. Style changes
+							// would also run the layouts of all containers, which is not part
+							// of loading a diagram.
+							for (var i = 0; i < pages.length; i++)
 							{
-								var cell = cells[id];
+								var root = graph.model.root;
 								
-								if (cell != null && cell.style != null)
+								if (pages[i] != null && pages[i] != this.currentPage)
 								{
-									cell.style += ';sketch=1;' + (cell.style.indexOf('fontFamily=') == -1 || cell.style.indexOf('fontFamily=Helvetica;') > -1? 
-											'fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;' : '');
+									this.updatePageRoot(pages[i]);
+									root = pages[i].root;
+									
+									// Encodes the page with its new cells and view state on save
+									pages[i].needsUpdate = true;
+									
+									if (pages[i].viewState != null)
+									{
+										pages[i].viewState.gridEnabled = false;
+										pages[i].viewState.pageVisible = false;
+									}
+								}
+								
+								var stack = [root];
+								
+								while (stack.length > 0)
+								{
+									var cell = stack.pop();
+									
+									if (cell.style != null)
+									{
+										cell.style += ';sketch=1;' + (cell.style.indexOf('fontFamily=') == -1 || cell.style.indexOf('fontFamily=Helvetica;') > -1? 
+													'fontFamily=Architects Daughter;fontSource=https%3A%2F%2Ffonts.googleapis.com%2Fcss%3Ffamily%3DArchitects%2BDaughter;' : '');
+									}
+									
+									for (var j = 0; j < cell.getChildCount(); j++)
+									{
+										stack.push(cell.getChildAt(j));
+									}
 								}
 							}
+
+							// Repaints the cells with the new styles
+							graph.refresh();
 						}
 						catch(e)
 						{
@@ -26881,35 +26895,23 @@
 
 		if (typeof spec !== 'string')
 		{
-			// A non-array (or empty) spec would serialize to a childLayout
-			// that silently kills the container's live layout.
-			if (!Array.isArray(spec) || spec.length == 0)
-			{
-				throw new Error('Invalid layout list: ' + JSON.stringify(spec));
-			}
-
 			var list = [];
 
-			for (var i = 0; i < spec.length; i++)
+			for (var i = 0; Array.isArray(spec) && i < spec.length; i++)
 			{
-				var entry = spec[i];
+				// The names of the removed mxGraph layouts are written as
+				// their ELK replacements (which get the container defaults
+				// below) or skipped
+				var entry = Graph.replaceLegacyLayout(spec[i]);
 
-				// Not container-safe: mxRadialTreeLayout ignores the parent
-				// frame and crashes on delete-triggered re-runs (the reason
-				// radial containers had to wait for ELK), and mxOrgChartLayout
-				// only exists after loadOrgChartLayouts, so a persisted
-				// reference is dead in the next session. mxFastOrganicLayout
-				// seeds coincident cells with Math.random and restarts its
-				// force sim from the current positions, so every manager
-				// re-run rescrambles the diagram (never converges — use
-				// elkOrganic instead). mxCircleLayout as JSON misses the
-				// getLayout branch's transparent anchor / moveCircle handling
-				// that the raw 'circleLayout' string gets, so it re-plants the
-				// ring by a constant offset on every run (unbounded drift) —
-				// container circle layouts must go through that string form.
-				if (entry != null && (entry.layout == 'mxRadialTreeLayout' ||
-					entry.layout == 'mxOrgChartLayout' ||
-					entry.layout == 'mxFastOrganicLayout' ||
+				// Not container-safe: mxOrgChartLayout only exists after
+				// loadOrgChartLayouts, so a persisted reference is dead in the
+				// next session. mxCircleLayout as JSON misses the getLayout
+				// branch's transparent anchor / moveCircle handling that the
+				// raw 'circleLayout' string gets, so it re-plants the ring by a
+				// constant offset on every run (unbounded drift) — container
+				// circle layouts must go through that string form.
+				if (entry != null && (entry.layout == 'mxOrgChartLayout' ||
 					entry.layout == 'mxCircleLayout'))
 				{
 					throw new Error('Not supported as childLayout: ' + entry.layout);
@@ -27004,7 +27006,18 @@
 					entry = {layout: entry.layout, config: config};
 				}
 
-				list.push(entry);
+				if (entry != null)
+				{
+					list.push(entry);
+				}
+			}
+
+			// A non-array spec, or one without layouts (empty or skipped
+			// layouts only), would serialize to a childLayout that silently
+			// kills the container's live layout.
+			if (list.length == 0)
+			{
+				throw new Error('Invalid layout list: ' + JSON.stringify(spec));
 			}
 
 			// Validates the list (throws for unknown layout names) so a spec
@@ -27133,13 +27146,15 @@
 	 * invokes the optional done callback. Used by the #create hash's
 	 * applyLayouts option — the layout manager only runs childLayouts when
 	 * the model changes, so a freshly opened file keeps its stored positions
-	 * unless they are applied explicitly. ELK layouts in JSON childLayout
-	 * specs need the elk bundle, which loads asynchronously — wait for it
-	 * like executeLayoutSpec does, but only when such a spec is present, so
-	 * diagrams with legacy string layouts (flowLayout, treeLayout, …) stay
-	 * independent of the bundle. After the wait times out the layouts still
-	 * run best-effort: the legacy layouts apply and the ELK containers are
-	 * skipped (with a console error from the layout manager).
+	 * unless they are applied explicitly. ELK layouts (JSON childLayout specs
+	 * and the flowLayout, treeLayout and organicLayout values, which run as
+	 * ELK layouts) need the elk bundle, which loads asynchronously — wait
+	 * for it like executeLayoutSpec does, but only when such a layout is
+	 * present, so diagrams with other string layouts (stackLayout,
+	 * circleLayout, …) stay independent of the bundle. After the wait times
+	 * out the layouts still run best-effort: the other layouts apply and the
+	 * ELK containers are skipped (with a console error from the layout
+	 * manager).
 	 */
 	EditorUi.prototype.applyChildLayouts = function(done)
 	{
@@ -27181,13 +27196,14 @@
 			{
 				try
 				{
-					var list = Graph.decodeChildLayout(
-						graph.getCellStyle(cells[i])['childLayout']);
+					var list = Graph.getChildLayouts(graph.getCellStyle(cells[i]));
 
 					for (var j = 0; list != null && j < list.length; j++)
 					{
-						if (list[j] != null && typeof Graph.elkLayoutAlgorithms[
-							list[j].layout] === 'string')
+						var entry = Graph.replaceLegacyLayout(list[j]);
+
+						if (entry != null && typeof Graph.elkLayoutAlgorithms[
+							entry.layout] === 'string')
 						{
 							return true;
 						}
@@ -28037,7 +28053,7 @@
 									// Double encoding for XML arg is needed for UTF8 encoding
 							       	var req = new mxXmlRequest(EXPORT_URL, 'format=png&embedXml=' +
 							       		((data.format == 'xmlpng') ? '1' : '0') + 
-							       		(pageId != null? '&pageId=' + pageId : '') +
+							       		(pageId != null? '&pageId=' + encodeURIComponent(pageId) : '') +
 							       		(data.layerIds != null && data.layerIds.length > 0?
 										'&extras=' + encodeURIComponent(JSON.stringify({layerIds: data.layerIds})) : '') +
 							       		(data.scale != null? '&scale=' + data.scale : '') +'&base64=1&xml=' +
@@ -29679,14 +29695,74 @@
 	};
 	
 	/**
-	 *
+	 * Returns true if the given CSV needs mxOrgChartLayout: its # layout is
+	 * orgchart, or a layout list or style names mxOrgChartLayout. Reads the
+	 * processing instructions the way doImportCsv does, so a ## comment that
+	 * mentions orgchart (as the default CSV does) does not count.
+	 */
+	EditorUi.isOrgChartCsv = function(text)
+	{
+		if (text == null)
+		{
+			return false;
+		}
+		else if (text.indexOf('mxOrgChartLayout') >= 0)
+		{
+			return true;
+		}
+
+		var lines = text.split('\n');
+		var index = 0;
+
+		while (index < lines.length && lines[index].charAt(0) == '#')
+		{
+			var line = lines[index].replace(/\r$/, '');
+			index++;
+
+			while (index < lines.length && line.charAt(line.length - 1) == '\\' &&
+				lines[index].charAt(0) == '#')
+			{
+				line = line.substring(0, line.length - 1) + mxUtils.trim(lines[index].substring(1));
+				index++;
+			}
+
+			var idx = line.indexOf(':');
+
+			if (line.charAt(1) != '#' && idx > 0 &&
+				mxUtils.trim(line.substring(1, idx)) == 'layout')
+			{
+				var value = mxUtils.trim(line.substring(idx + 1));
+
+				if (value == 'orgchart' || value.indexOf('mxOrgChartLayout') >= 0)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	};
+
+	/**
+	 * Imports the given CSV. Only an org chart CSV loads the org chart layout,
+	 * which is not in the viewer bundles (atlas-viewer.min.js among them).
 	 */
 	EditorUi.prototype.importCsv = function(text, done, graph, noSpinner)
 	{
-		this.loadOrgChartLayouts(mxUtils.bind(this, function()
+		var fn = mxUtils.bind(this, function()
 		{
 			this.doImportCsv(text, done, graph);
-		}), noSpinner);
+		});
+
+		if (EditorUi.isOrgChartCsv(text))
+		{
+			this.loadOrgChartLayouts(fn, noSpinner);
+		}
+		else
+		{
+			// doImportCsv routes its own errors to handleError
+			fn();
+		}
 	};
 
 	/**
@@ -29698,6 +29774,7 @@
 		{
     		var lines = text.split('\n');
     		var allCells = [];
+			var updatedCells = [];
 			var parents = [];
     		var cells = [];
     		var dups = Object.create(null);
@@ -29979,6 +30056,32 @@
         		// Null prototype: keys are untrusted parent column values
         		var rowCells = Object.create(null);
 
+				// Writes the value of a detached data cell without a model change.
+				// The edit of the import must not contain changes of cells outside
+				// of the model: undo and redo resolve changed cells by ID (see
+				// repairResolve), and the data cell of an updated row has the ID
+				// of the updated cell.
+				var doc = mxUtils.createXmlDocument();
+
+				var setAttributeForDataCell = function(dataCell, name, value)
+				{
+					if (dataCell.value == null || typeof dataCell.value != 'object')
+					{
+						var obj = doc.createElement('UserObject');
+						obj.setAttribute('label', dataCell.value || '');
+						dataCell.value = obj;
+					}
+
+					if (value != null)
+					{
+						dataCell.value.setAttribute(name, value);
+					}
+					else
+					{
+						dataCell.value.removeAttribute(name);
+					}
+				};
+
         		graph.model.beginUpdate();
         		try
         		{
@@ -30011,7 +30114,7 @@
 						
 						for (var j = 0; j < values.length; j++)
 				    	{
-							graph.setAttributeForCell(newCell, attribs[j], values[j]);
+							setAttributeForDataCell(newCell, attribs[j], values[j]);
 
 							if (cell != null && !ignoreCell)
 							{
@@ -30025,7 +30128,8 @@
 							
 							if (tempLabel != null)
 							{
-								graph.labelChanged(newCell, tempLabel);
+								setAttributeForDataCell(newCell, 'label',
+									Graph.zapGremlins(tempLabel));
 
 								if (cell != null && !ignoreCell)
 								{
@@ -30044,7 +30148,7 @@
 							}
 						}
 
-						graph.setAttributeForCell(newCell, 'placeholders', '1');
+						setAttributeForDataCell(newCell, 'placeholders', '1');
 						newCell.style = graph.replacePlaceholders(newCell, newCell.style, vars);
 
 						if (cell != null && !ignoreCell)
@@ -30066,7 +30170,21 @@
 								cells.push(cell);
 							}
 
+							if (mxUtils.indexOf(updatedCells, cell) < 0)
+							{
+								updatedCells.push(cell);
+							}
+
 							graph.fireEvent(new mxEventObject('cellsInserted', 'cells', [cell]));
+
+							// Moves the link column to the link as for new cells below
+							// if the row has a value for it
+							if (link != null && link != 'link' &&
+								newCell.getAttribute(link) != null)
+							{
+								graph.setLinkForCell(cell, newCell.getAttribute(link));
+								graph.setAttributeForCell(cell, link, null);
+							}
 
 							// Updates the auto size of the updated cell after the
 							// styles of the cellsInserted event were applied
@@ -30113,22 +30231,27 @@
 						}
 
     					var exists = cell != null;
-						cell = newCell;
-    					
-						if (!exists)
+
+						// Updated cells are targets of the connections of new rows.
+						// Connections are only created for new rows (see below), so
+						// importing a file again does not duplicate them.
+						if (!exists || !ignoreCell)
 						{
 	    					for (var e = 0; e < edges.length; e++)
 	    					{
-	    						lookups[edges[e].to][cell.getAttribute(edges[e].to)] = cell;
+	    						lookups[edges[e].to][newCell.getAttribute(edges[e].to)] =
+									(exists) ? cell : newCell;
 	    					}
 						}
-						
+
+						cell = newCell;
+
 						if (link != null && link != 'link')
 						{
-							graph.setLinkForCell(cell, cell.getAttribute(link));
+							setAttributeForDataCell(cell, 'link', cell.getAttribute(link));
 							
 							// Removes attribute
-							graph.setAttributeForCell(cell, link, null);
+							setAttributeForDataCell(cell, link, null);
 						}
 						
 						// Sets the geometry
@@ -30212,7 +30335,19 @@
 	    					
 	    					if (parent != null)
 	    					{
-	    						parent.style = graph.replacePlaceholders(parent, parentstyle, vars);
+								// Reports the new style of the parent like an
+								// arrange action (see Graph.beginArrange)
+								var arrange = graph.beginArrange();
+								try
+								{
+									graph.model.setStyle(parent, graph.replacePlaceholders(
+										parent, parentstyle, vars));
+								}
+								finally
+								{
+									graph.endArrange(arrange);
+								}
+
 	    						graph.addCell(cell, parent);
 								parents.push(parent);
 	    					}
@@ -30346,7 +30481,7 @@
 															(def.dy != null) ? def.dy : 0);
 													}
 								
-													edgeCell.insert(el);
+													graph.model.add(edgeCell, el);
 												}
 											}
 
@@ -30382,9 +30517,11 @@
 					// Removes ignored attributes after processing above
 					if (ignore != null)
 					{
-						for (var i = 0; i < allCells.length; i++)
+						var imported = allCells.concat(updatedCells);
+
+						for (var i = 0; i < imported.length; i++)
 						{
-							var cell = allCells[i];
+							var cell = imported[i];
 							
 							for (var j = 0; j < ignore.length; j++)
 					    	{
@@ -30429,7 +30566,7 @@
 
 							for (var i = 0; i < cells.length; i++)
 		    				{
-								var geo = graph.getCellGeometry(cells[i]);
+								var geo = graph.getCellGeometry(cells[i]).clone();
 								geo.x = Math.round(geo.x + snapDx);
 								geo.y = Math.round(geo.y + snapDy);
 
@@ -30442,35 +30579,43 @@
 								{
 									geo.height = Math.round(graph.snap(geo.height));
 								}
+
+								graph.model.setGeometry(cells[i], geo);
 		    				}
 						};
 						
-						// Resolve `auto` to one of the legacy hierarchical keys so
+						// Resolve `auto` to one of the CSV_ELK_LAYOUTS keys so
 						// the dispatch below picks the matching branch.
-						// Tree-shape (1 root + (n-1) edges) → verticaltree
-						// (mxCompactTreeLayout). Otherwise, 1 root →
-						// verticalflow (ELK's layered, tuned to mimic the
-						// legacy mxHierarchicalLayout output — see
-						// CSV_ELK_LAYOUTS for the per-key tuning).
-						// Both default to vertical (DOWN / NORTH) for `auto`.
+						// Tree-shape (1 root + (n-1) edges) → verticaltree.
+						// Otherwise, 1 root → verticalflow (ELK's layered,
+						// tuned to mimic the legacy mxHierarchicalLayout
+						// output — see CSV_ELK_LAYOUTS for the per-key
+						// tuning). Both default to vertical (DOWN) for `auto`.
 						// The default CSV (orgchart with cross-refs) lands on
-						// verticalflow.
-						if (layout == 'auto' && roots.length == 1)
+						// verticalflow. Several roots with edges → organic,
+						// without edges the cells keep their positions.
+						if (layout == 'auto')
 						{
-							layout = (select.length == 2 * cells.length - 1) ?
-								'verticaltree' : 'verticalflow';
+							if (roots.length == 1)
+							{
+								layout = (select.length == 2 * cells.length - 1) ?
+									'verticaltree' : 'verticalflow';
+							}
+							else if (select.length > cells.length)
+							{
+								layout = 'organic';
+							}
 						}
 
 						// JSON custom-layout arrays, the libavoid shorthand and
 						// the Arrange > Layout preset names all resolve through
 						// the shared spec resolver (see resolveLayoutList). The
 						// CSV-specific names are handled in the branches below
-						// and must not reach the resolver: 'organic' names the
-						// legacy mxFastOrganicLayout here (not the ELK menu
-						// preset of the same name), and the CSV_ELK_LAYOUTS
-						// keys layer the CSV spacing knobs onto their configs.
-						var resolvedLayouts = (layout == 'organic' ||
-							EditorUi.CSV_ELK_LAYOUTS[layout] != null) ?
+						// and must not reach the resolver: 'organic' and the
+						// other CSV_ELK_LAYOUTS keys layer the CSV spacing
+						// knobs onto their configs (not the ELK menu preset of
+						// the same name).
+						var resolvedLayouts = (EditorUi.CSV_ELK_LAYOUTS[layout] != null) ?
 							null : this.resolveLayoutList(layout);
 
 						if (resolvedLayouts != null)
@@ -30482,11 +30627,59 @@
 							var jsonLayouts = graph.createLayouts(resolvedLayouts);
 							this.scopeLayoutsToCells(jsonLayouts, select);
 
-							this.executeLayouts(jsonLayouts, function()
+							var elk = typeof ElkLayout !== 'undefined' &&
+								jsonLayouts.some(function(layout)
 							{
-								postProcess();
-								temp();
+								return layout instanceof ElkLayout;
 							});
+
+							var post = function()
+							{
+								// ELK packs its output near (0,0), so the result is moved
+								// to the free insert point like in the ELK branch below
+								if (elk)
+								{
+									var bbox = graph.getBoundingBoxFromGeometry(select);
+
+									if (bbox != null)
+									{
+										graph.moveCells(select, x0 - bbox.x, y0 - bbox.y);
+									}
+								}
+
+								postProcess();
+							};
+
+							// Runs post with the last layout so that it changes the
+							// model in the update (and undo step) of that layout, as
+							// the callback of executeLayouts runs after that update
+							var last = jsonLayouts.pop();
+							var postLayout = new mxGraphLayout(graph);
+							postLayout.execute = post;
+
+							if (last != null && typeof last.prepare === 'function')
+							{
+								// Asynchronous layouts (eg. ELK) apply their result
+								// in their own update
+								jsonLayouts.push({prepare: function(parent, done)
+								{
+									last.prepare(parent, function(err, apply)
+									{
+										done(err, function()
+										{
+											apply.apply(this, arguments);
+											post();
+										});
+									});
+								}});
+							}
+							else
+							{
+								jsonLayouts.push(new mxCompositeLayout(graph, (last != null) ?
+									[last, postLayout] : [postLayout]));
+							}
+
+							this.executeLayouts(jsonLayouts, temp);
 
 							afterInsert = null;
 						}
@@ -30513,33 +30706,6 @@
 
 				    		afterInsert = null;
 						}
-						else if (layout == 'verticaltree' || layout == 'horizontaltree')
-						{
-			    			// Required for layouts to work with new cells
-			    			graph.view.validate();
-
-		    				var treeLayout = new mxCompactTreeLayout(graph, layout == 'horizontaltree');
-		    				treeLayout.levelDistance = nodespacing;
-		    				treeLayout.edgeRouting = false;
-		    				treeLayout.resetEdges = false;
-							treeLayout.sortEdges = true;
-
-		    				var treeLayoutIsVertexIgnored = treeLayout.isVertexIgnored;
-
-			    			// Ignore other cells
-		    				treeLayout.isVertexIgnored = function(vertex)
-		    				{
-		    					return treeLayoutIsVertexIgnored.apply(this, arguments) ||
-		    						mxUtils.indexOf(cells, vertex) < 0;
-		    				};
-
-		    				this.executeLayout(function()
-		    	    		{
-		    					treeLayout.execute(graph.getDefaultParent(), (roots.length > 0) ? roots[0] : null);
-		    	    		}, true, afterInsert);
-
-		    				afterInsert = null;
-						}
 						else if (layout == 'orgchart')
 						{
 			    			// Required for layouts to work with new cells
@@ -30565,34 +30731,6 @@
 		    	    		
 		    	    		afterInsert = null;
 						}
-		    			else if (layout == 'organic' || (layout == 'auto' &&
-		    					select.length > cells.length))
-		    			{
-			    			// Required for layouts to work with new cells
-			    			graph.view.validate();
-
-		    				var organicLayout = new mxFastOrganicLayout(graph);
-		    				organicLayout.forceConstant = nodespacing * 3;
-		    				organicLayout.disableEdgeStyle = false;
-		    				organicLayout.resetEdges = false;
-
-		    				var organicLayoutIsVertexIgnored = organicLayout.isVertexIgnored;
-
-			    			// Ignore other cells
-		    				organicLayout.isVertexIgnored = function(vertex)
-		    				{
-		    					return organicLayoutIsVertexIgnored.apply(this, arguments) ||
-		    						mxUtils.indexOf(cells, vertex) < 0;
-		    				};
-
-		    	    		this.executeLayout(function()
-		    	    		{
-		    	    			organicLayout.execute(graph.getDefaultParent());
-				    			postProcess();
-		    	    		}, true, afterInsert);
-
-		    	    		afterInsert = null;
-		    			}
 						else if (EditorUi.CSV_ELK_LAYOUTS[layout] != null)
 						{
 							// Required for layouts to work with new cells
@@ -30680,6 +30818,14 @@
 										// from their natural rendered widths
 										// (e.g. Edward.w=218 → 220), breaking
 										// the visual match with the target.
+										// Only the parallel edges are spread
+										// for the layouts that keep the edges
+										// (as the legacy organic layout did).
+										if (elkConfig.edgeStyle == 'keep' &&
+											edgeLayout.spacing > 0)
+										{
+											edgeLayout.execute(graph.getDefaultParent());
+										}
 									}, true, function()
 									{
 										balanceElk();
@@ -35147,5 +35293,6 @@ mxUtils.extend(HeadlessEditorUi, EditorUi);
  */
 HeadlessEditorUi.prototype.createUi = function() {};
 HeadlessEditorUi.prototype.addTrees = function() {};
+HeadlessEditorUi.prototype.addBeforeUnloadListener = function() {};
 HeadlessEditorUi.prototype.onBeforeUnload = function() {};
 HeadlessEditorUi.prototype.updateActionStates = function() {};

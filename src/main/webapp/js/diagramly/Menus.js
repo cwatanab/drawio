@@ -1712,13 +1712,8 @@
 		});
 		
 		var menus = this;
-		var layoutMenu = this.get('layout');
-		var layoutMenuFunct = layoutMenu.funct;
 
-		// Original (mxGraph) layout items are exposed via the Legacy Layouts submenu
-		this.put('legacyLayout', new Menu(layoutMenuFunct));
-
-		layoutMenu.funct = function(menu, parent)
+		this.get('layout').funct = function(menu, parent)
 		{
 			// Grayed out until a layout has run in this session; see the
 			// runLastLayout action for the replay semantics.
@@ -1756,10 +1751,6 @@
 				addElk('radialTree');
 				menu.addSeparator(parent);
 				addElk('organic');
-			}
-			else
-			{
-				layoutMenuFunct.apply(this, arguments);
 			}
 
 			menu.addItem(mxResources.get('orgChart') + '...', null, function()
@@ -1891,8 +1882,7 @@
 			}, parent, null, isGraphEnabled());
 
 			// Circle layout has no ELK equivalent (radial is concentric rings,
-			// not a single ring), so it lives alongside orgChart in the main
-			// menu rather than in Legacy.
+			// not a single ring), so it lives alongside orgChart.
 			menu.addItem(mxResources.get('circle'), null, mxUtils.bind(this, function()
 			{
 				editorUi.tryAndHandle(mxUtils.bind(this, function()
@@ -1983,13 +1973,6 @@
 				}));
 			}), parent);
 
-			if (typeof ElkLayout !== 'undefined')
-			{
-				menu.addSeparator(parent);
-				editorUi.menus.addSubmenu('legacyLayout', menu, parent,
-					mxResources.get('legacyLayouts'));
-			}
-
 			menu.addSeparator(parent);
 
 			editorUi.menus.addMenuItem(menu, 'runLayout', parent, null, null, mxResources.get('custom') + '...');
@@ -2069,6 +2052,11 @@
 						editorUi.checkForUpdates();
 					});
 
+					editorUi.actions.addAction('restartToUpdate', function()
+					{
+						editorUi.installUpdate();
+					});
+
 					editorUi.actions.put('desktopZoomIn', new Action('zoomIn', function()
 					{
 						editorUi.desktopZoomIn();
@@ -2089,7 +2077,9 @@
 
 					if (urlParams['disableUpdate'] != '1')
 					{
-						this.addMenuItems(menu, ['check4Updates', '-'], parent);
+						this.addMenuItems(menu, [(editorUi.updateState != null &&
+							editorUi.updateState.status == 'downloaded') ?
+							'restartToUpdate' : 'check4Updates', '-'], parent);
 					}
 
 					this.addMenuItems(menu, ['desktopResetZoom', 'desktopZoomIn',
@@ -3054,8 +3044,9 @@
 					{
 						if (url != null)
 						{
-							var dlg = new EmbedDialog(editorUi, '<img src="' + ((current.constructor != DriveFile) ?
-								url : 'https://drive.google.com/uc?id=' + current.getId()) + '"/>');
+							var dlg = new EmbedDialog(editorUi, '<img src="' + EditorUi.encodeAttributeUrl(
+								(current.constructor != DriveFile) ? url : 'https://drive.google.com/uc?id=' +
+								current.getId()) + '"/>');
 							editorUi.showDialog(dlg.container, 450, 270, true, true, null, false, null, new mxRectangle(0, 0, 400, 250));
 							dlg.init();
 						}
@@ -3128,11 +3119,12 @@
 									JSON.stringify(hiddenTagsMap || {})));
 							}
 
-							var dlg = new EmbedDialog(editorUi, '<iframe frameborder="0" style="width:' + width +
-								';height:' + height + ';" src="' + editorUi.createLink(linkTarget, linkColor,
+							var dlg = new EmbedDialog(editorUi, '<iframe frameborder="0" style="width:' +
+								mxUtils.htmlEntities(width) + ';height:' + mxUtils.htmlEntities(height) +
+								';" src="' + EditorUi.encodeAttributeUrl(editorUi.createLink(linkTarget, linkColor,
 								allPages, lightbox, editLink, layers, (link == 'public') ? publicUrl : null,
-								link == 'copy', params, null, currentPage, transparent, darkMode, linkIcons, tooltipIcons) + '"' + ((transparent) ?
-								' allowtransparency="true"' : '') + '></iframe>');
+								link == 'copy', params, null, currentPage, transparent, darkMode, linkIcons,
+								tooltipIcons)) + '"' + ((transparent) ? ' allowtransparency="true"' : '') + '></iframe>');
 							editorUi.showDialog(dlg.container, 450, 270, true, true, null, false, null, new mxRectangle(0, 0, 400, 250));
 							dlg.init();
 						}, true, true);
@@ -5232,7 +5224,7 @@
 					editorUi.menus.addMenuItems(menu, ['pageTabs'], parent);
 				}
 
-				this.addMenuItems(menu, ['ruler', '-', 'tooltips', 'animations',
+				this.addMenuItems(menu, ['ruler', '-', 'tooltips', 'animations', 'zoomWheel',
 					'-', 'grid', 'guides', '-', 'connectionArrows', 'connectionPoints', '-',
 					'resetView', 'zoomIn', 'zoomOut'], parent);
 
@@ -5399,6 +5391,25 @@
 			googleFontsAction.setToggleAction(true);
 			googleFontsAction.setSelectedCallback(function() { return enableGoogleFonts; });
 
+			var autoUpdate = urlParams['autoUpdate'] == '1';
+
+			var autoUpdateAction = editorUi.actions.addAction('autoUpdate', function()
+			{
+				editorUi.toggleAutoUpdate();
+				autoUpdate = !autoUpdate;
+			});
+
+			autoUpdateAction.setToggleAction(true);
+			autoUpdateAction.setSelectedCallback(function() { return autoUpdate; });
+
+			// Older desktop builds do not pass autoUpdate and have no handler for it
+			var desktopItems = ['-', 'googleFonts', 'spellCheck', 'autoBkp', 'drafts'];
+
+			if (urlParams['autoUpdate'] != null && urlParams['disableUpdate'] != '1')
+			{
+				desktopItems.push('autoUpdate');
+			}
+
 			editorUi.actions.addAction('openDevTools', function()
 			{
 				editorUi.openDevTools();
@@ -5454,7 +5465,7 @@
 				editorUi.menus.addSubmenu('units', menu, parent);
 				this.addSubmenu('diagramLanguage', menu, parent);
 				editorUi.menus.addMenuItems(menu, ['-', 'collapseExpand',
-					'animations', 'tooltips'], parent);
+					'animations', 'tooltips', 'zoomWheel'], parent);
 
 				if (Editor.currentTheme != 'simple')
 				{
@@ -5466,7 +5477,7 @@
 
 				if (EditorUi.isElectronApp)
 				{
-					editorUi.menus.addMenuItems(menu, ['-', 'googleFonts', 'spellCheck', 'autoBkp', 'drafts'], parent);
+					editorUi.menus.addMenuItems(menu, desktopItems, parent);
 				}
 
 				menu.addSeparator(parent);
@@ -5498,7 +5509,7 @@
 
 				if (EditorUi.isElectronApp)
 				{
-					this.addMenuItems(menu, ['-', 'googleFonts', 'spellCheck', 'autoBkp', 'drafts'], parent);
+					this.addMenuItems(menu, desktopItems, parent);
 				}
 
 				menu.addSeparator(parent);

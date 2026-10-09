@@ -1,3 +1,211 @@
+08-OCT-2026: 32.4.1
+
+- Adds a --var flag to the generate/v3 eval runner
+- Paints the numbers of rack cabinets with numDisp=on again
+- Limits the cells of the battery stack for tiny heights and huge widths
+- Limits the segments of zigzag shapes for huge widths
+- Lets the fast-rt shard-load tool read its token from a private file
+- Shows Ctrl+Mousewheel instead of Alt+Mousewheel in the zoom hints
+- Counts browsers once a day per app version for a version dashboard
+- Lists the version dashboard's analytics token in the secret inventory
+- Removes the conversion service fallback from the Visio import
+- Removes the conversion service fallback from the connectors' Visio importer
+- Retires the Visio conversion route in the convert worker
+- Points the vss.draw.io converter page to the app
+
+08-OCT-2026: 32.4.0
+
+- Adds the Confluence Cloud Gliffy migration key for a missing configuration space
+- Moves the builder image and the CI workflows to Node 24
+- Pins the rebuilt Node 24 builder image in the builds
+- Adds github excludes
+- Removes the doc.*/i18n redirect to the retired translations spreadsheet
+- Skips Cloudflare's managed rulesets in the edge drift watch
+- Adds a live test of the realtime cache and relay in production
+- Sends the client log to the promoted GAE version instead of 23-1-5
+- Reads the client error log in the java17 log shape as well as java8
+- Fetches Google Drive files in the proxy worker instead of GAE 23-1-5
+- Moves the GAE deploy to the java21 runtime
+- Filters the Error Reporting console on the message's VERSION= line
+- Sends the proxy worker's Authorization header only to Trello
+- Adds MCP_REPO_TOKEN to the secret rotation list
+- Sends the Trello token only with Trello attachment URLs
+- Fixed monday.com app
+- Notes that the VERSION= console filter was checked on both log shapes
+- Turns off the log worker's workers.dev and preview URLs in its config
+- Updates stable to 32.3.0
+- Opens Microsoft 365 viewer links in the app [jgraph/drawio#5663]
+- Encodes page IDs in links and escapes the iframe embed snippet
+- Changed monday.com app to be monday.com hosted
+- Keeps the focus in dialogs opened from the search box [jgraph/drawio-desktop#2577]
+- Keeps Tab inside modal dialogs [jgraph/drawio-desktop#2577]
+- Sets the secure flag on the token cookie on HTTPS pages
+- Keeps the focus outline of the page list in the Google add-on dialog
+- Shows a spinner on Google add-on panel buttons while the script runs
+- Moves the border width of the Google add-ons into the insert dialog
+- Fixes lost changes after applying file XML in Edit Diagram [jgraph/drawio#5795]
+- Reports realtime edits on a page whose root is not the model root [jgraph/drawio#5795]
+- Adds 45 degree angle guides for edge waypoints and ends [jgraph/drawio#1668] [jgraph/drawio#5794]
+- Mentions the angle guides in the help text of the position guides option
+- Runs the legacy flow, tree and organic layouts on ELK
+- Removes the Legacy Layouts submenu
+- Removes mxHierarchicalLayout, mxCompactTreeLayout, mxRadialTreeLayout and mxFastOrganicLayout
+- Stops sign-in links from signing the browser in to someone else's account
+- URL-encodes the values of the auth worker's token requests
+- Adds the 45 degree angle guides to new connections [jgraph/drawio#1668]
+- Sends Office dialog results only to the add-in on the dialog's own origin
+- Removes mxPartitionLayout and mxEdgeLabelLayout
+- Switches the generate/v3 Mermaid model to Haiku 5.5
+- Hands the sign-in code to the app when its popup lacks the state cookie
+- Stops /teamsToken from setting a refresh token cookie
+- Stops values that OAuth providers repeat from running as script
+- Only accepts a tenant ID or domain as the tenant of /teamsToken
+- Documents how the auth worker binds the sign-in state to the browser
+- Zooms with the mouse wheel and scrolls with trackpads in Chromium and Firefox on macOS
+- Accepts the sign-in code exchange only as a GET
+- Accepts the sign-in code exchange from browsers without Sec-Fetch-Site
+- Stops a taken-over sign-in popup from handing the app someone else's tokens
+- Marks the mouse wheel shortcuts that Zoom with Mouse Wheel swaps
+- Lets self-hosted sign-in work from apps in cross-site iframes
+- Zooms with the mouse wheel and scrolls with precision touchpads on Windows
+- Accepts the configuration message only in embed mode
+- Refuses AI endpoints on draw.io and diagrams.net hosts
+- Accepts only plain text in the resources configuration
+- Checks the state from the URL before using its key in the auth servlets
+- Accepts the sign-in code exchange of the auth servlets only as a GET
+- Paints the ducts of the horizontal routing bank again
+- Snaps rack layouts to units only with rackUnitSize
+- Keeps the settings of embed popups apart from those of the app
+- Uses the unit size of the parent rack for the ducts of routing banks
+- Scales the global shadow with the zoom in model coordinates
+- Reverts the shadow notes in the model coordinates guide
+- Removes the unused TeamsServlet
+- Hears about saves on the realtime socket without Pusher
+- Limits the numbered units of rack cabinets
+- Limits the ducts of huge cable ducts and routing banks
+- Cuts the realtime relay from 64 to 32 shards
+- Adds an eval-only effort override to the generate/v3 worker
+- Routes generate/v3 connectors around shapes with libavoid
+- Removes the fast-rt shard-count guard now that the 32 shards are live
+- Sends nothing to the realtime cache while no other client is connected
+
+06-OCT-2026: 32.3.0
+
+- Places the width handles of the tapered arrow in model units
+- Keeps the padding and border of plain text label backgrounds in screen pixels
+- Adds a test of the custom handles of all shapes with fast rendering
+- Adds translations for the Drive home and Confluence Lucid import keys
+- Stores CF account for cli
+- Keeps the requested scopes when the auth worker retries a token request
+- Stops the fast-rt relay reading request bodies other than the 1 KiB rollout policy
+- Updates the vendored drawio-plantuml bundle to commit 99d935c
+- Updates stable channel to 32.2.0
+- Updates the vendored drawio-plantuml bundle to commit c4251a4
+- Accepts error messages and graceful handling as fixes in the error log pass
+- Adds a design proposal for realtime roles
+- Stops Safari clipping the right edge of the format panel
+- Fixes the property table header in dark mode in Safari
+- Returns labels without markup from Graph.domPurify without calling DOMPurify
+- Skips the HTML conversion of plain text labels in mxSvgCanvas2D
+- Checks sanitized attributes after DOMPurify instead of in an attribute hook
+- Decodes geometry nodes of the wrong type as geometries
+- Ignores cell references to objects that are not cells
+- Fixes the waypoints of layouts for edges without a geometry
+- Fixes the sanitizer for labels with data URIs of a few MB
+- Closes dialogs and menus when the UI is destroyed
+- Ignores page moves with invalid indices
+- Resets settings that are not an object
+- Disables routing for the session after the solver throws
+- Skips cyclic references when encoding objects
+- Skips table column handles for columns without a geometry
+- Skips text updates for labels whose DOM was changed
+- Accepts a clipboard writeText without a promise
+- Skips the user button images if they were removed
+- Validates colors without a 2D canvas context
+- Keeps date placeholders if the date is invalid
+- Stops headless UIs from replacing the unload handler of the page
+- Records the error log groups fixed or handled on 2026-10-06
+- Removes waypoints when an edge segment is moved back to the default route [jgraph/drawio#5761]
+- Disables include directives in mxObjectCodec
+- Decodes the forward references of cells in linear time
+- Stops decoding at a maximum depth instead of overflowing the stack
+- Updates the vendored drawio-plantuml bundle to commit aa1b3cd
+- Loads the org chart layout on demand in atlas-viewer.min.js
+- Moves the realtime patch cache in production from AWS to the relay
+- Adds the Forge-only Confluence Cloud keys for hidden config pages, zips without page IDs and draft notices
+- Moves edge labels with the curve when the route of a curved edge is edited
+- Adds the labelOnCurve style for labels along the painted curve of curved edges
+- Loads deep cell hierarchies in linear time
+- Documents Safari testing via safaridriver
+- Adds excludes
+- Compares geometries in realtime diffs regardless of the order of their keys
+- Diffs only the own properties of cells in realtime diffs
+- Advances the realtime snapshot by patching instead of cloning dirty pages
+- Stops the object codec from decoding into methods or hiding them
+- Skips cell diffs that cannot change the cross-reference resolution of a flush
+- Creates the waypoint arrays of rt-test in the client realm
+- Decodes the geometries of realtime diffs with a new codec
+- Runs the realtime test harness on Chrome for Testing on macOS
+- Runs all headless test harnesses on Chrome for Testing on macOS
+- Warns when a test harness falls back to Google Chrome on macOS
+- Validates and invalidates long chains of connected edges without recursion
+- Adds the Confluence Cloud Gliffy migration keys for state loading failures and reduced pictures
+- Caps proxy worker responses at 20 MB and encodes base64 without per-character strings
+- Adds the desktop update notice, Restart to Update and the Automatic Updates toggle [jgraph/drawio-desktop#2569]
+- Diffs the geometries, values and custom properties of changed cells only
+- Caches the locked states of cells for large selections in deep hierarchies
+- Applies the placeholders checkbox of Edit Data on apply only
+- Changes the ID of a cell in Edit Data with an undoable change
+- Changes the cells of the CSV import through the model
+- Repaints the cells after converting an embedded diagram to sketch
+- Documents the direct size fix-up of imported SVG images without a size
+- Leaves the cells of table rows without a geometry unchanged in TableLayout
+- Changes children through the model in the random test plugin
+- Keeps the original styles of the update plugin demo outside the cells
+- Updates the realtime sync guide for the fixed raw writes of cells
+- Ignores child nodes of models other than root and defs
+- Decodes child nodes only into objects of their own type
+- Documents the geometry decode rule of realtime patches
+- Updates the vendored drawio-plantuml bundle to commit a7c8b27
+- Measures imported SVG images without a size before inserting them
+- Builds CSV import data cells without model changes
+- Adds a runner for Safari checks that never takes the focus
+- Updates the vendored drawio-plantuml bundle to commit 01a5dd4
+- Applies the CSV link and ignore columns to updated cells
+- Ignores numeric cell IDs from 2^52 for the next ID of the model
+- Sorts cells and updates the selection in linear time for deep hierarchies
+- Diffs the reactive delta of a remote patch with the changed cells only
+- Connects new CSV rows to the cells updated by the import
+- Adds regression tests for the CSV import
+- Checks if the selection cells are in the model in linear time
+- Skips the menu label in Toolbar.setMenuText if its span is missing
+- Records the error log groups first seen up to 2026-10-06
+- Ignores cell values in child nodes that are not XML nodes
+- Updates the vendored drawio-plantuml bundle to commit 7678646
+- binary compression moved to stencils.min.js file
+- Changes the ID of a page in Edit Data with an undoable change
+- Validates edge chains with removed terminals like the recursion
+- Replays changes of detached cells on the recorded objects
+- Walks only the patched parents and their ancestors when patching a page
+- Keeps user objects in the XHTML, SVG or MathML namespace on save
+- Updates the vendored drawio-plantuml bundle to commit 4cb1309
+- Converts all pages of an embedded diagram to sketch
+- Keeps whitespace-only blocks of text flow labels on one line in SVG labels
+- Records the error log groups first seen on the evening of 2026-10-06
+- Compares only the cells updated by a flush in full in the cross-reference diff
+- Snaps the CSV import in the undo step of its last layout
+- Counts the sync work of a one-cell edit in the perf-gate scenario
+- Validates the invalid cells in linear time for deep hierarchies
+- Places CSV imports with ELK layout lists at the free insert point
+- Documents the console fallback of the error log skill in more detail
+- Decodes cell styles from files only as strings
+- Records the non-string cell style groups as fixed by d4b0bb8ba9
+- Adds regression tests for deep hierarchies and long edge chains
+- Renames labelOnCurve to curveGeometry
+- Adds line jumps along the painted curve of curved edges with curveGeometry
+- Ignores the attributes of models in mxModelCodec
+- Adds regression tests for decoding untrusted XML with the codecs
+
 05-OCT-2026: 32.2.0
 
 - Reads the state geometry in each step of wipe and pop animations

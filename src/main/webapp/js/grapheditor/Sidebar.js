@@ -1973,6 +1973,17 @@ Sidebar.prototype.addSearchPalette = function(expand)
 		input.value = null;
 	});
 
+	// Focuses the diagram unless the action moved the focus, eg. into a dialog
+	function focusGraph()
+	{
+		var ae = document.activeElement;
+
+		if (ae == null || ae == input || ae == document.body)
+		{
+			graph.container.focus();
+		}
+	};
+
 	var hiddenActions = ['about', 'deleteAll', 'showBoundingBox',
 		'createSidebarEntry', 'downloadDesktop', 'toggleGoogleFonts'];
 	
@@ -2188,7 +2199,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 					setEnterAction(item, function()
 					{
 						executeAction(action, arguments);
-						graph.container.focus();
+						focusGraph();
 					});
 				}
 
@@ -2198,7 +2209,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 					setCtrlEnterAction(item, function()
 					{
 						executeAction(action, arguments);
-						graph.container.focus();
+						focusGraph();
 					});
 				}
 			}
@@ -2847,7 +2858,7 @@ Sidebar.prototype.addGeneralPalette = function(expand)
 		}),
 		this.addEntry('curve', mxUtils.bind(this, function()
 	 	{
-			var cell = new mxCell('', new mxGeometry(0, 0, 50, 50), 'curved=1;endArrow=classic;html=1;');
+			var cell = new mxCell('', new mxGeometry(0, 0, 50, 50), 'curved=1;curveGeometry=1;endArrow=classic;html=1;');
 			cell.geometry.setTerminalPoint(new mxPoint(0, 50), true);
 			cell.geometry.setTerminalPoint(new mxPoint(50, 0), false);
 			cell.geometry.points = [new mxPoint(50, 50), new mxPoint(0, 0)];
