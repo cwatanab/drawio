@@ -331,22 +331,28 @@ DrawioFile.prototype.getShadowPages = function()
 	{
 		this.shadowPages = this.ui.getPagesForXml(this.initialData, true);
 
-		if (this.shadowVars === undefined)
+		if (this.shadowVars === undefined || this.shadowAttributes === undefined)
 		{
-			this.shadowVars = null;
+			var root = null;
 
 			try
 			{
 				var doc = mxUtils.parseXml(this.initialData);
-				var root = doc.documentElement;
+				root = doc.documentElement;
 				root = this.ui.editor.extractGraphModel(root, true, true) || root;
-
-				if (root != null && root.nodeName == 'mxfile')
-				{
-					this.shadowVars = root.getAttribute('vars');
-				}
 			}
 			catch (e) {}
+
+			if (this.shadowVars === undefined)
+			{
+				this.shadowVars = (root != null && root.nodeName == 'mxfile') ?
+					root.getAttribute('vars') : null;
+			}
+
+			if (this.shadowAttributes === undefined)
+			{
+				this.shadowAttributes = this.getSyncedFileAttributes(root);
+			}
 		}
 	}
 
@@ -354,14 +360,103 @@ DrawioFile.prototype.getShadowPages = function()
 };
 
 /**
- * Sets the shadow pages.
+ * Sets the shadow pages with the given vars and synced file attributes (see
+ * getSyncedFileAttributes) or those of the file node.
  */
-DrawioFile.prototype.setShadowPages = function(pages, optVars)
+DrawioFile.prototype.setShadowPages = function(pages, optVars, optAttributes)
 {
 	this.shadowPages = pages;
 	this.shadowVars = (optVars !== undefined) ? optVars :
 		((this.ui.fileNode != null) ?
 			this.ui.fileNode.getAttribute('vars') : null);
+	this.shadowAttributes = (optAttributes !== undefined) ? optAttributes :
+		this.getSyncedFileAttributes();
+};
+
+/**
+ * Attributes of the file node other than vars that are sent with the live
+ * changes, saves and merges in EditorUi.DIFF_FILE. Unlike vars they have no
+ * ownership of pending writes: the last write wins, and they are not resent
+ * or retracted.
+ */
+DrawioFile.syncedFileAttributes = ['pageGroups'];
+
+/**
+ * Returns the synced file attributes of the given mxfile node or of the file
+ * node as an object with null for missing attributes.
+ */
+DrawioFile.prototype.getSyncedFileAttributes = function(node)
+{
+	node = (node !== undefined) ? node : this.ui.fileNode;
+	var result = {};
+
+	for (var i = 0; i < DrawioFile.syncedFileAttributes.length; i++)
+	{
+		var name = DrawioFile.syncedFileAttributes[i];
+		result[name] = (node != null && node.nodeName == 'mxfile') ?
+			node.getAttribute(name) : null;
+	}
+
+	return result;
+};
+
+/**
+ * Returns the synced file attributes of the shadow pages.
+ */
+DrawioFile.prototype.getShadowAttributes = function()
+{
+	this.getShadowPages(); // ensure lazy init
+
+	return (this.shadowAttributes != null) ? this.shadowAttributes :
+		this.getSyncedFileAttributes(null);
+};
+
+/**
+ * Adds the synced file attributes that differ from the given base to the
+ * file changes of the given patch.
+ */
+DrawioFile.prototype.diffSyncedFileAttributes = function(patch, base, attributes)
+{
+	for (var i = 0; i < DrawioFile.syncedFileAttributes.length; i++)
+	{
+		var name = DrawioFile.syncedFileAttributes[i];
+
+		if (attributes[name] != base[name])
+		{
+			if (patch[EditorUi.DIFF_FILE] == null)
+			{
+				patch[EditorUi.DIFF_FILE] = {};
+			}
+
+			patch[EditorUi.DIFF_FILE][name] = attributes[name];
+		}
+	}
+};
+
+/**
+ * Returns a copy of the given synced file attributes with the values of the
+ * file changes in the given patches.
+ */
+DrawioFile.prototype.patchSyncedFileAttributes = function(attributes, patches)
+{
+	var result = {};
+
+	for (var i = 0; i < DrawioFile.syncedFileAttributes.length; i++)
+	{
+		var name = DrawioFile.syncedFileAttributes[i];
+		result[name] = (attributes != null) ? attributes[name] : null;
+
+		for (var j = 0; patches != null && j < patches.length; j++)
+		{
+			if (patches[j] != null && patches[j][EditorUi.DIFF_FILE] != null &&
+				patches[j][EditorUi.DIFF_FILE][name] !== undefined)
+			{
+				result[name] = patches[j][EditorUi.DIFF_FILE][name];
+			}
+		}
+	}
+
+	return result;
 };
 
 /**
@@ -547,6 +642,7 @@ DrawioFile.prototype.mergeFile = function(file, success, error, diffShadow, imme
 				diffShadow : shadow, pages)];
 
 			var incomingVars = null;
+			var incomingAttributes = this.getSyncedFileAttributes(null);
 
 			try
 			{
@@ -557,6 +653,7 @@ DrawioFile.prototype.mergeFile = function(file, success, error, diffShadow, imme
 				if (root != null && root.nodeName == 'mxfile')
 				{
 					incomingVars = root.getAttribute('vars');
+					incomingAttributes = this.getSyncedFileAttributes(root);
 				}
 			}
 			catch (e) {}
@@ -565,6 +662,9 @@ DrawioFile.prototype.mergeFile = function(file, success, error, diffShadow, imme
 			{
 				patches[0][EditorUi.DIFF_FILE] = {vars: incomingVars};
 			}
+
+			this.diffSyncedFileAttributes(patches[0],
+				this.getShadowAttributes(), incomingAttributes);
 
 			var ignored = this.ignorePatches(patches);
 			
@@ -608,7 +708,7 @@ DrawioFile.prototype.mergeFile = function(file, success, error, diffShadow, imme
 					}
 					else
 					{
-						this.setShadowPages(pages, incomingVars);
+						this.setShadowPages(pages, incomingVars, incomingAttributes);
 
 						// Patches the realtime document
 						if (this.sync != null)
@@ -686,7 +786,7 @@ DrawioFile.prototype.mergeFile = function(file, success, error, diffShadow, imme
 			{
 				// The file can still differ in what the diff ignores, eg. a
 				// page size that another tool removed (see diffSavedPages)
-				this.setShadowPages(pages, incomingVars);
+				this.setShadowPages(pages, incomingVars, incomingAttributes);
 				this.clearConflict();
 				this.setDescriptor(file.getDescriptor());
 				this.descriptorChanged();
@@ -1625,6 +1725,8 @@ DrawioFile.prototype.patch = function(patches, resolver, undoable, sendChanges, 
 
 				this.sync.snapshotVars = (this.ui.fileNode != null) ?
 					this.ui.fileNode.getAttribute('vars') : null;
+				this.sync.snapshotAttributes = this.patchSyncedFileAttributes(
+					this.sync.snapshotAttributes, patches);
 
 				// Verifies that the snapshot matches the pages while no
 				// local changes are pending, ie. the next outgoing diff
@@ -4006,6 +4108,7 @@ DrawioFile.prototype.fileSaved = function(savedData, lastDesc, success, error, t
 		savedRoot = this.ui.editor.extractGraphModel(savedRoot, true, true) || savedRoot;
 		var savedVars = (savedRoot != null && savedRoot.nodeName == 'mxfile') ?
 			savedRoot.getAttribute('vars') : null;
+		var savedAttributes = this.getSyncedFileAttributes(savedRoot);
 		pages = (pages != null) ? pages :
 			this.ui.getPagesForNode(savedRoot, null, true);
 
@@ -4013,7 +4116,7 @@ DrawioFile.prototype.fileSaved = function(savedData, lastDesc, success, error, t
 		{
 			if (this.sync == null || this.isOptimisticSync())
 			{
-				this.setShadowPages(pages, savedVars);
+				this.setShadowPages(pages, savedVars, savedAttributes);
 				this.confirmFileVars(savedVars);
 				
 				if (this.sync != null)
@@ -4038,8 +4141,8 @@ DrawioFile.prototype.fileSaved = function(savedData, lastDesc, success, error, t
 			}
 			else
 			{
-				this.sync.fileSaved(pages, lastDesc,
-					success, error, token, checksum, savedVars);
+				this.sync.fileSaved(pages, lastDesc, success, error,
+					token, checksum, savedVars, savedAttributes);
 			}
 		}
 		catch (e)

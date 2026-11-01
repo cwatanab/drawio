@@ -1500,9 +1500,11 @@ mxStencilRegistry.allowEval = false;
 				// it is ready — wait for it before parsing.
 				this.whenScriptReady(EditorUi.isMermaidSupported, mxUtils.bind(this, function()
 				{
+					// The diagram is the page, so its text alternative becomes
+					// the Alt Text of the page (see createMermaidPageXml)
 					var onMermaid = mxUtils.bind(this, function(diagramXml)
 					{
-						fn(null, diagramXml, null, name, false);
+						fn(null, this.createMermaidPageXml(diagramXml), null, name, false);
 						checkDrafts();
 					});
 

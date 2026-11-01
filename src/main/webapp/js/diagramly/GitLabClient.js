@@ -830,6 +830,7 @@ GitLabClient.prototype.showGitLabDialog = function(showFiles, fn, hideNoFilesErr
 	div.style.lineHeight = '1.2em';
 	div.style.height = '274px';
 	content.appendChild(div);
+	Editor.keepFocusInList(div);
 
 	var listItem = document.createElement('div');
 	listItem.style.textOverflow = 'ellipsis';
@@ -856,6 +857,7 @@ GitLabClient.prototype.showGitLabDialog = function(showFiles, fn, hideNoFilesErr
 		link.style.cursor = 'pointer';
 		mxUtils.write(link,  label);
 		mxEvent.addListener(link, 'click', fn);
+		Editor.initKeyboardButton(link);
 
 		if (underline)
 		{
@@ -971,6 +973,7 @@ GitLabClient.prototype.showGitLabDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{
@@ -1116,6 +1119,7 @@ GitLabClient.prototype.showGitLabDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{
@@ -1240,6 +1244,7 @@ GitLabClient.prototype.showGitLabDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{

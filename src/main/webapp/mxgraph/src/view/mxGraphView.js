@@ -236,6 +236,22 @@ mxGraphView.prototype.invalidCells = null;
 mxGraphView.prototype.invalidCellsRoot = null;
 
 /**
+ * Variable: invalidatedCells
+ *
+ * Maps the cells that <invalidate> has walked to the walks that visited
+ * them while the changes of the model are processed (see
+ * <mxGraph.graphModelChanged>), so that the cells that an earlier walk with
+ * the same flags or with all of them has visited and their descendants and
+ * connected edges are not walked again. Each combination of the flags is a
+ * bit, as two walks with different flags do not cover a walk with both.
+ * Otherwise each call walks the cells again, which is
+ * quadratic for chains of edges that are connected to edges. This is null
+ * if each call walks all cells and during <validate>, which makes states
+ * valid that later calls must invalidate again.
+ */
+mxGraphView.prototype.invalidatedCells = null;
+
+/**
  * Variable: createdCells
  *
  * Holds the cells whose states were created in <validateInvalidCells>.
@@ -248,6 +264,15 @@ mxGraphView.prototype.createdCells = null;
  * Specifies if <validate> is walking all cells.
  */
 mxGraphView.prototype.validatingAllCells = false;
+
+/**
+ * Variable: walkStopped
+ *
+ * Specifies if <validateCell> removed the state of a cell that is no longer
+ * visible without walking its descendants since <validateInvalidCells>
+ * reset it. Default is false.
+ */
+mxGraphView.prototype.walkStopped = false;
 
 /**
  * Variable: fullValidationRequired
@@ -1018,17 +1043,32 @@ mxGraphView.prototype.invalidate = function(cell, recurse, includeEdges)
 		// recursion and visits each cell once. A recursion would overflow
 		// the call stack for long chains of edges that are connected to
 		// edges and visit cells that are reachable on several paths, eg.
-		// edges between edges, exponentially often.
-		var visited = new mxDictionary();
+		// edges between edges, exponentially often. Cells that a walk with
+		// the same flags or with all of them visited for an earlier change
+		// are skipped (see invalidatedCells).
+		var visited = (this.invalidatedCells != null) ?
+			this.invalidatedCells : new mxDictionary();
+		var walk = ((recurse) ? 1 : 0) | ((includeEdges) ? 2 : 0);
+		var covers = 0;
+
+		for (var i = 0; i < 4; i++)
+		{
+			if ((i & walk) == walk)
+			{
+				covers |= 1 << i;
+			}
+		}
+
 		var stack = [cell];
 
 		while (stack.length > 0)
 		{
 			var tmp = stack.pop();
+			var walked = visited.get(tmp) || 0;
 
-			if (!visited.get(tmp))
+			if ((walked & covers) == 0)
 			{
-				visited.put(tmp, true);
+				visited.put(tmp, walked | (1 << walk));
 				var state = this.getState(tmp);
 
 				if (state != null)
@@ -1073,6 +1113,65 @@ mxGraphView.prototype.invalidate = function(cell, recurse, includeEdges)
  * Default is <currentRoot> or the root of the model.
  */
 mxGraphView.prototype.validate = function(cell)
+{
+	// Measures the texts of the plain text labels with backgrounds at once
+	// (see mxSvgCanvas2D.textBackgrounds)
+	var backgrounds = mxSvgCanvas2D.textBackgrounds;
+	var invalidated = this.invalidatedCells;
+	this.invalidatedCells = null;
+
+	if (backgrounds == null)
+	{
+		mxSvgCanvas2D.textBackgrounds = [];
+	}
+
+	// Removes the listeners of the handlers that changed shapes destroy
+	// in one pass (see mxSelectionCellsHandler.updateHandler)
+	var sources = [this.graph, this, this.graph.getModel()];
+
+	for (var i = 0; i < sources.length; i++)
+	{
+		sources[i].beginRemoveListeners();
+	}
+
+	try
+	{
+		this.validateCells(cell);
+	}
+	finally
+	{
+		for (var i = 0; i < sources.length; i++)
+		{
+			sources[i].endRemoveListeners();
+		}
+
+		// Later changes walk the cells again, as their states are valid now
+		this.invalidatedCells = (invalidated != null) ? new mxDictionary() : null;
+
+		if (backgrounds == null)
+		{
+			try
+			{
+				mxSvgCanvas2D.measureTextBackgrounds();
+			}
+			finally
+			{
+				mxSvgCanvas2D.textBackgrounds = null;
+			}
+		}
+	}
+};
+
+/**
+ * Function: validateCells
+ *
+ * Implements <validate> for the given cell or the root.
+ *
+ * Parameters:
+ *
+ * cell - Optional <mxCell> to be used as the root of the validation.
+ */
+mxGraphView.prototype.validateCells = function(cell)
 {
 	var t0 = mxLog.enter('mxGraphView.validate');
 	this.resetValidationState();
@@ -1257,7 +1356,9 @@ mxGraphView.prototype.validateInvalidCells = function(root)
 	var cells = this.invalidCells;
 	var visited = new mxDictionary();
 	var visibility = new mxDictionary();
+	var reached = new mxDictionary();
 	var valid = new mxDictionary();
+	var flags = [];
 	var list = [];
 	var i;
 
@@ -1266,8 +1367,6 @@ mxGraphView.prototype.validateInvalidCells = function(root)
 
 	try
 	{
-		// Creates and removes the states of the invalid cells and their
-		// descendants as in the walk over all cells
 		for (i = 0; i < cells.length; i++)
 		{
 			if (!visited.get(cells[i]))
@@ -1277,9 +1376,44 @@ mxGraphView.prototype.validateInvalidCells = function(root)
 
 				if (visible != null)
 				{
-					this.validateCell(cells[i], visible);
 					list.push(cells[i]);
+					flags.push(visible);
 				}
+			}
+		}
+
+		// Creates and removes the states of the invalid cells and their
+		// descendants as in the walk over all cells. Cells under another
+		// invalid cell are left to the walk of that cell, which reaches them
+		// with the same visible argument unless it stops above them (see
+		// below), so that nested invalid cells walk their descendants once
+		// instead of once for each invalid ancestor.
+		var nested = [];
+		this.walkStopped = false;
+
+		for (i = 0; i < list.length; i++)
+		{
+			if (this.hasInvalidAncestor(list[i], root, visited, reached))
+			{
+				nested.push(i);
+			}
+			else
+			{
+				this.validateCell(list[i], flags[i]);
+			}
+		}
+
+		// A walk that removed the state of a cell that is no longer visible
+		// did not walk the descendants of that cell (see <validateCell>), eg.
+		// if tags hide a container and a cell inside of it in one edit. The
+		// nested cells are then walked as well, which gives the same states
+		// as a walk for each invalid cell. Otherwise these walks would only
+		// visit the same cells again with the same results.
+		if (this.walkStopped)
+		{
+			for (i = 0; i < nested.length; i++)
+			{
+				this.validateCell(list[nested[i]], flags[nested[i]]);
 			}
 		}
 
@@ -1379,6 +1513,60 @@ mxGraphView.prototype.getValidationVisibility = function(cell, root, cache)
 	}
 
 	return visible;
+};
+
+/**
+ * Function: hasInvalidAncestor
+ *
+ * Returns true if an ancestor of the given cell up to the given root is in
+ * the given invalid cells. The <validateCell> walk of that ancestor in
+ * <validateInvalidCells> then reaches the cell with the visible argument
+ * that <getValidationVisibility> returns, unless it removes the state of a
+ * cell above it (see <walkStopped>).
+ *
+ * Parameters:
+ *
+ * cell - <mxCell> whose ancestors should be checked.
+ * root - <mxCell> that is the root of the validation.
+ * invalid - <mxDictionary> that contains the invalid cells.
+ * cache - <mxDictionary> for the results of the ancestors, which are shared
+ * by the cells, so that checking all ancestors of many cells is not
+ * quadratic in the depth of the hierarchy.
+ */
+mxGraphView.prototype.hasInvalidAncestor = function(cell, root, invalid, cache)
+{
+	var model = this.graph.getModel();
+	var ancestors = [];
+	var parent = (cell != root) ? model.getParent(cell) : null;
+	var result = false;
+
+	while (parent != null)
+	{
+		var tmp = cache.get(parent);
+
+		if (tmp != null)
+		{
+			result = tmp;
+			break;
+		}
+
+		ancestors.push(parent);
+
+		if (invalid.get(parent))
+		{
+			result = true;
+			break;
+		}
+
+		parent = (parent != root) ? model.getParent(parent) : null;
+	}
+
+	for (var i = 0; i < ancestors.length; i++)
+	{
+		cache.put(ancestors[i], result);
+	}
+
+	return result;
 };
 
 /**
@@ -1513,27 +1701,63 @@ mxGraphView.prototype.isPaneNode = function(node)
  */
 mxGraphView.prototype.getPreviousNode = function(cell, root)
 {
-	var prev = this.getPreviousCell(cell, root);
-
-	while (prev != null)
+	if (cell == root)
 	{
-		var state = this.getState(prev);
+		return null;
+	}
 
-		if (state != null && state.shape != null)
+	// Walks the cells in the order of getPreviousCell with the indices of the
+	// children in pairs of a cell and the index of the child before which the
+	// walk continues, as getPreviousCell looks up the index of each cell and
+	// made a run of cells without nodes quadratic (40,000 cells: 1.7 s)
+	var model = this.graph.getModel();
+	var parent = model.getParent(cell);
+	var stack = (parent != null) ? [parent, parent.getIndex(cell)] : [];
+
+	while (stack.length > 0)
+	{
+		var index = stack.pop();
+		var tmp = stack.pop();
+		var child = null;
+
+		for (var i = index - 1; i >= 0 && child == null; i--)
 		{
-			var shapes = this.graph.cellRenderer.getShapesForState(state);
-
-			for (var i = shapes.length - 1; i >= 0; i--)
+			if (this.isValidState(model.getChildAt(tmp, i)))
 			{
-				if (shapes[i] != null && shapes[i].node != null &&
-					this.isPaneNode(shapes[i].node))
-				{
-					return shapes[i].node;
-				}
+				child = model.getChildAt(tmp, i);
+				stack.push(tmp, i, child, model.getChildCount(child));
 			}
 		}
 
-		prev = this.getPreviousCell(prev, root);
+		if (child == null)
+		{
+			var state = this.getState(tmp);
+
+			if (state != null && state.shape != null)
+			{
+				var shapes = this.graph.cellRenderer.getShapesForState(state);
+
+				for (var i = shapes.length - 1; i >= 0; i--)
+				{
+					if (shapes[i] != null && shapes[i].node != null &&
+						this.isPaneNode(shapes[i].node))
+					{
+						return shapes[i].node;
+					}
+				}
+			}
+
+			// Continues before the ancestors of the cell
+			if (stack.length == 0 && tmp != root)
+			{
+				parent = model.getParent(tmp);
+
+				if (parent != null)
+				{
+					stack.push(parent, parent.getIndex(tmp));
+				}
+			}
+		}
 	}
 
 	return null;
@@ -2133,6 +2357,7 @@ mxGraphView.prototype.validateCell = function(cell, visible)
 		if (state != null && !visible)
 		{
 			this.removeState(cell);
+			this.walkStopped = true;
 		}
 		else
 		{
@@ -3876,17 +4101,29 @@ mxGraphView.prototype.getPoint = function(state, geometry)
 		var pointCount = state.absolutePoints.length;
 		// Rounds in model units so that the result does not depend on the scale
 		var dist = Math.round(mxUtils.unscale((gx + 0.5) * state.length, this.scale)) * this.scale;
-		var segment = state.segments[0];
-		var length = 0;				
+		var lengths = this.getSegmentLengths(state);
 		var index = 1;
+		var hi = pointCount - 1;
 
-		while (dist >= Math.round(mxUtils.unscale(length + segment, this.scale)) * this.scale &&
-			index < pointCount - 1)
+		// Finds the first point whose rounded length from the first point is
+		// greater than the distance, as a walk over the segments would, in
+		// logarithmic time, as the labels of an edge each search its points
+		while (index < hi)
 		{
-			length += segment;
-			segment = state.segments[index++];
+			var mid = (index + hi) >> 1;
+
+			if (dist >= Math.round(mxUtils.unscale(lengths[mid], this.scale)) * this.scale)
+			{
+				index = mid + 1;
+			}
+			else
+			{
+				hi = mid;
+			}
 		}
 
+		var segment = state.segments[index - 1];
+		var length = lengths[index - 1];
 		var factor = (segment == 0) ? 0 : (dist - length) / segment;
 		var p0 = state.absolutePoints[index-1];
 		var pe = state.absolutePoints[index];
@@ -3930,6 +4167,39 @@ mxGraphView.prototype.getPoint = function(state, geometry)
 	}
 	
 	return new mxPoint(x, y);		
+};
+
+/**
+ * Function: getSegmentLengths
+ *
+ * Returns the lengths of the given edge state from its first point to each
+ * point, the sums of its <mxCellState.segments> in their order, which are
+ * kept in the state for its current segments.
+ *
+ * Parameters:
+ *
+ * state - <mxCellState> that represents the state of the edge.
+ */
+mxGraphView.prototype.getSegmentLengths = function(state)
+{
+	var segments = state.segments;
+	var cache = state.segmentLengths;
+
+	if (cache == null || cache.segments !== segments ||
+		cache.lengths.length != segments.length + 1)
+	{
+		var lengths = [0];
+
+		for (var i = 0; i < segments.length; i++)
+		{
+			lengths.push(lengths[i] + segments[i]);
+		}
+
+		cache = {segments: segments, lengths: lengths};
+		state.segmentLengths = cache;
+	}
+
+	return cache.lengths;
 };
 
 /**
@@ -4638,17 +4908,35 @@ mxGraphView.prototype.updateLabelBoundingBoxes = function()
 
 		// Only for labels whose size changed, as the edges are painted again,
 		// which loads the images in their labels again, so that an image in
-		// the label of such an edge would measure the labels again forever
-		for (var i = 0; i < perimeters.length; i++)
-		{
-			var state = perimeters[i][0];
-			var size = perimeters[i][1];
-			this.updateBoundingBox(state);
-			var bbox = state.text.boundingBox;
+		// the label of such an edge would measure the labels again forever.
+		// Each cell is walked once for all labels (see invalidatedCells).
+		var invalidated = this.invalidatedCells;
 
-			if (size == null || bbox == null || bbox.width != size[0] || bbox.height != size[1])
+		if (invalidated == null)
+		{
+			this.invalidatedCells = new mxDictionary();
+		}
+
+		try
+		{
+			for (var i = 0; i < perimeters.length; i++)
 			{
-				this.invalidate(state.cell, false, true);
+				var state = perimeters[i][0];
+				var size = perimeters[i][1];
+				this.updateBoundingBox(state);
+				var bbox = state.text.boundingBox;
+
+				if (size == null || bbox == null || bbox.width != size[0] || bbox.height != size[1])
+				{
+					this.invalidate(state.cell, false, true);
+				}
+			}
+		}
+		finally
+		{
+			if (invalidated == null)
+			{
+				this.invalidatedCells = null;
 			}
 		}
 

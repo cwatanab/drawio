@@ -242,6 +242,14 @@ var mxSettings =
 	{
 		mxSettings.settings.recentColors = recentColors;
 	},
+	getRecentShapes: function()
+	{
+		return mxSettings.settings.recentShapes;
+	},
+	setRecentShapes: function(recentShapes)
+	{
+		mxSettings.settings.recentShapes = recentShapes;
+	},
 	getFormatWidth: function()
 	{
 		return parseInt(mxSettings.settings.formatWidth);
@@ -339,6 +347,7 @@ var mxSettings =
 			customLibraries: Editor.defaultCustomLibraries,
 			plugins: [],
 			recentColors: [],
+			recentShapes: [],
 			formatWidth: mxSettings.defaultFormatWidth,
 			sidebarWidth: null,
 			collapsedSections: {},
@@ -429,6 +438,12 @@ var mxSettings =
 			if (mxSettings.settings.recentColors == null)
 			{
 				mxSettings.settings.recentColors = [];
+			}
+
+			// Recent shapes of the sidebar (see Sidebar.addRecentShapes)
+			if (!Array.isArray(mxSettings.settings.recentShapes))
+			{
+				mxSettings.settings.recentShapes = [];
 			}
 
 			if (mxSettings.settings.customFonts == null)

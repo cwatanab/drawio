@@ -315,6 +315,53 @@ dialog's `init` — callers that focus something else afterwards must check
 `document.activeElement` first (see `focusGraph` in
 `Sidebar.addSearchPalette`).
 
+Shift+arrow keys move the focus to the nearest control in that direction
+(`EditorUi.focusTabStopInDirection`). Shift+Arrow Left and Right stay in the
+row and continue with the previous or next control in the order of Tab at
+its ends, eg. from the preview of the More Shapes dialog to its buttons.
+Arrow keys without Shift scroll areas that scroll, so a part of a dialog that
+scrolls and has no controls, eg. a preview, needs `tabindex="0"` for the
+keyboard.
+
+Buttons (`geBtn`, also `gePrimaryBtn`) and collapsible titles
+(`geCollapsibleTitle`) show the keyboard focus as a 2px outline in the focus
+color (`:focus-visible`). Dark mode removes all shadows (`body.geDarkMode *`
+sets `box-shadow: none !important`), so a focus ring must be an outline,
+never a box-shadow. The outline is inside of the element
+(`outline-offset: -2px`): the content of dialogs scrolls
+(`.geDialog > :first-child`), which would clip a ring outside of controls at
+its edges.
+
+Every dialog has `role="dialog"` (and `aria-modal` if modal), and screen
+readers name it after the first `<h3>` or `.geDialogTitle` in its content
+(`aria-labelledby`), so give dialogs a title of that kind. A dialog without
+such a title sets `aria-label` on its content element (the one passed to
+`showDialog`), which the dialog moves to itself (eg. Edit Data). When a dialog
+closes, the focus goes back to the control that opened it with the keyboard
+(`Dialog.getReturnFocus`: a button, checkbox or select outside the diagram
+that matches `:focus-visible`, eg. in the format panel or in another
+dialog). Otherwise it goes to the diagram or to the label being edited.
+
+## Names, Images and Targets
+
+Screen readers and the axe checks of the accessibility reports
+(`security-privacy-legal`, `scripts/vpat_axe_test.js`) need:
+
+- **A name for every field**: text before a field is no `<label>`, so set
+  `aria-label` on inputs, selects and text areas (eg. the Filename field of
+  the library dialog).
+- **`alt` on every image**: `alt=""` for icons inside a named control or with
+  a name next to them (droppers, resize grips), else a text (the preview of
+  the More Shapes dialog).
+- **Targets of 24px** (WCAG 2.5.8): icon buttons get padding up to 24px and a
+  negative margin of the same size, so the row does not change (Swap, Copy
+  and Opacity of the color window). Smaller targets need 24px from center to
+  center (the dots of the color schemes).
+- **Contrast of 4.5:1** for text: gray text uses `#5f5f63` in light mode and
+  `#a0a0a0` in dark mode (`geMenuShortcut`), not `gray` or an opacity. Text
+  on a color picks black or white by the relative luminance
+  (`ColorDialog.hasDarkText`).
+
 ## Testing Dialogs
 
 Use `?dev=1&ui=classic` to keep the menubar visible regardless of window size.

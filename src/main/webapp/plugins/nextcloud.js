@@ -195,11 +195,7 @@ Draw.loadPlugin(function(ui)
             }
             else if (!this.savingFile)
             {
-                // Sets shadow modified state during save
-                this.savingFileTime = new Date();
-                this.setShadowModified(false);
-                this.savingFile = true;
-
+                this.beginSave();
 
                 var doSave = mxUtils.bind(this, function()
                 {
@@ -219,9 +215,7 @@ Draw.loadPlugin(function(ui)
                         {
                             try
                             {
-                                // Checks for changes during save
-                                this.setModified(this.getShadowModified());
-                                this.savingFile = false;
+                                this.endSave();
                                 this.desc = Object.assign({}, this.desc); // Clone the object
                                 Object.assign(this.desc, resp); // Assign the new values
             
@@ -320,14 +314,6 @@ Draw.loadPlugin(function(ui)
     };
 
     /**
-     * 
-     */
-    EmbedFile.prototype.getHash = function()
-    {
-        return 'E' + this.getId();
-    };
-
-    /**
      * Overridden to enable the autosave option in the document properties dialog.
      */
     EmbedFile.prototype.isAutosaveOptional = function()
@@ -401,15 +387,37 @@ Draw.loadPlugin(function(ui)
     };
 
     /**
-     * Using MD5 of create timestamp and user ID as crypto key.
+     * Returns the random key that the host stores in the descriptor, or the
+     * legacy key for a file that has not been saved with one yet.
      */
     EmbedFile.prototype.getChannelKey = function()
     {
-        if (typeof CryptoJS !== 'undefined')
+        return (this.desc != null && typeof this.desc.key === 'string' &&
+            this.desc.key.length > 0) ? this.desc.key :
+            this.getLegacyChannelKey();
+    };
+
+    /**
+     * Using MD5 of the instance ID and the file ID as crypto key. Both can be
+     * read from the channel ID, so anyone who knows the channel can derive
+     * this key.
+     */
+    EmbedFile.prototype.getLegacyChannelKey = function()
+    {
+        if (typeof CryptoJS !== 'undefined' && this.desc != null)
         {
-            return CryptoJS.MD5(this.desc.instanceId + this.desc.id).toString();
+            var seed = this.desc.instanceId + this.desc.id;
+
+            // Called for every activity event via DrawioFileSync.start
+            if (this.legacyKey == null || this.legacyKeySeed !== seed)
+            {
+                this.legacyKeySeed = seed;
+                this.legacyKey = CryptoJS.MD5(seed).toString();
+            }
+
+            return this.legacyKey;
         }
-        
+
         return null;
     };
 
@@ -422,23 +430,7 @@ Draw.loadPlugin(function(ui)
     };
 
     /**
-     * 
-     */
-    EmbedFile.prototype.getDescriptor = function()
-    {
-        return this.desc;
-    };
-
-    /**
-     * Updates the descriptor of this file with the one from the given file.
-     */
-    EmbedFile.prototype.setDescriptor = function(desc)
-    {
-        this.desc = desc || {};
-    };
-
-    /**
-     * 
+     *
      */
     EmbedFile.prototype.getDescriptorEtag = function(desc)
     {

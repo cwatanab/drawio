@@ -465,6 +465,7 @@ TrelloClient.prototype.showTrelloDialog = function(showFiles, fn)
 	div.style.overflow = 'auto';
 	div.style.height = '194px';
 	content.appendChild(div);
+	Editor.keepFocusInList(div);
 
 	var dlg = new CustomDialog(this.ui, content);
 	this.ui.showDialog(dlg.container, 340, 290, true, true);
@@ -484,7 +485,9 @@ TrelloClient.prototype.showTrelloDialog = function(showFiles, fn)
 		
 		if (preview != null)
 		{
+			// The name of the attachment follows the preview
 			var img = document.createElement('img');
+			img.setAttribute('alt', '');
 			img.src = preview.url;
 			img.width = preview.width;
 			img.height= preview.height;
@@ -494,6 +497,7 @@ TrelloClient.prototype.showTrelloDialog = function(showFiles, fn)
 		
 		mxUtils.write(link,  label);
 		mxEvent.addListener(link, 'click', fn);
+		Editor.initKeyboardButton(link);
 		
 		div.appendChild(link);
 		
@@ -592,6 +596,7 @@ TrelloClient.prototype.showTrelloDialog = function(showFiles, fn)
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{

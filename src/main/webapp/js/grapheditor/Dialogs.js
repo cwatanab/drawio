@@ -355,6 +355,7 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 	}
 
 	var input = document.createElement('input');
+	input.setAttribute('aria-label', mxResources.get('light'));
 	input.style.textOverflow = 'ellipsis';
 	input.style.marginLeft = '6px';
 	input.style.width = '100%';
@@ -367,6 +368,7 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 	wrapper.appendChild(inputDiv);
 	
 	var darkInput = document.createElement('input');
+	darkInput.setAttribute('aria-label', mxResources.get('dark'));
 	darkInput.style.textOverflow = 'ellipsis';
 	darkInput.style.margin = '0 6px';
 	darkInput.style.maxWidth = '70px';
@@ -415,17 +417,29 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 	advancedDiv.style.cursor = 'pointer';
 	advancedDiv.style.marginTop = '4px';
 	
+	// The arrow and the text are the button for the keyboard, next to the
+	// other buttons of the row as screen readers do not announce buttons
+	// inside of buttons
+	var advancedLabel = document.createElement('span');
+	advancedLabel.style.display = 'inline-flex';
+	advancedLabel.style.alignItems = 'center';
+	advancedDiv.appendChild(advancedLabel);
+
 	var collapse = document.createElement('img');
 	collapse.setAttribute('title', mxResources.get('dark'));
+	collapse.setAttribute('alt', '');
 	collapse.className = 'geAdaptiveAsset';
-	advancedDiv.appendChild(collapse);
+	advancedLabel.appendChild(collapse);
 
-	mxUtils.write(advancedDiv, mxResources.get('advanced'));
+	mxUtils.write(advancedLabel, mxResources.get('advanced'));
 
 	var swapBtn = document.createElement('img');
 	swapBtn.setAttribute('title', mxResources.get('swap'));
 	swapBtn.className = 'geAdaptiveAsset';
-	swapBtn.style.marginLeft = '6px';
+
+	// The padding makes the buttons 24 px targets and the margin keeps the row (WCAG 2.5.8)
+	swapBtn.style.margin = '-4px 0 -4px 2px';
+	swapBtn.style.padding = '4px';
 	swapBtn.style.width = '16px';
 	swapBtn.style.height = '16px';
 	swapBtn.style.cursor = 'pointer';
@@ -451,7 +465,7 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 
 	var copyBtn = swapBtn.cloneNode();
 	copyBtn.setAttribute('title', mxResources.get('copy'));
-	copyBtn.style.marginLeft = '2px';
+	copyBtn.style.marginLeft = '0px';
 	copyBtn.src = Editor.doubleArrowUpImage;
 
 	mxEvent.addListener(copyBtn, 'click', function(evt)
@@ -509,6 +523,10 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 	});
 
 	advancedDiv.appendChild(opacityBtn);
+	Editor.initKeyboardButton(advancedLabel);
+	Editor.initKeyboardButton(swapBtn);
+	Editor.initKeyboardButton(copyBtn);
+	Editor.initKeyboardButton(opacityBtn);
 
 	function updateCollapseIcon()
 	{
@@ -520,6 +538,9 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 		{
 			collapse.src = Editor.arrowDownImage;
 		}
+
+		advancedLabel.setAttribute('aria-expanded', (darkColorDiv.style.display != 'none') ?
+			'true' : 'false');
 	};
 
 	updateCollapseIcon();
@@ -595,9 +616,8 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 		}
 		else
 		{
-			input.style.color =
-				(mxUtils.isDarkColor(input.style.background)) ?
-				'#ffffff' : '#000000';
+			input.style.color = (ColorDialog.hasDarkText(input.style.background)) ?
+				'#000000' : '#ffffff';
 		}
 	};
 
@@ -1054,9 +1074,15 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 
 		var rows = presets.length / rowLength;
 		
+		// The colors are one control for Tab with the arrow keys between them
+		var grid = Editor.createKeyboardGrid(table, null, true);
+		var controls = [];
+		grid.begin();
+
 		for (var row = 0; row < rows; row++)
 		{
 			var tr = document.createElement('tr');
+			controls = [];
 			
 			for (var i = 0; i < rowLength; i++)
 			{
@@ -1102,6 +1128,10 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 						{
 							td.setAttribute('title', name);
 						}
+						else
+						{
+							td.setAttribute('aria-label', clr);
+						}
 					}
 					
 					tr.appendChild(td);
@@ -1109,6 +1139,8 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 					if (clr != null)
 					{
 						td.style.cursor = 'pointer';
+						td.setAttribute('role', 'button');
+						controls.push(td);
 						
 						mxEvent.addListener(td, 'click', function()
 						{
@@ -1194,12 +1226,18 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 			}
 			
 			tbody.appendChild(tr);
+
+			if (row + 1 < rows || !addResetOption)
+			{
+				grid.addRow(row, controls);
+			}
 		}
 		
 		if (addResetOption)
 		{
 			var td = document.createElement('td');
 			td.setAttribute('title', mxResources.get('reset'));
+			td.setAttribute('role', 'button');
 			td.className = 'geAdaptiveAsset';
 			td.style.border = '1px solid black';
 			td.style.padding = '0px';
@@ -1212,9 +1250,12 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 			td.style.cursor = 'pointer';
 			
 			tr.appendChild(td);
+			controls.push(td);
+			grid.addRow(row, controls);
 
 			mxEvent.addListener(td, 'click', function()
 			{
+				var focused = mxUtils.isAncestorNode(table, document.activeElement);
 				ColorDialog.resetRecentColors();
 				var newTable = createRecentColorTable();
 
@@ -1224,9 +1265,16 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 				}
 
 				recentTable = newTable;
+
+				// Keeps the focus in the colors for the keyboard
+				if (focused)
+				{
+					newTable.querySelector('[tabindex="0"]').focus();
+				}
 			});
 		}
 		
+		grid.end();
 		center.appendChild(table);
 		
 		return table;
@@ -1340,6 +1388,7 @@ var ColorDialog = function(editorUi, color, apply, cancelFn, defaultColor, defau
 	dropperBtn.style.cursor = 'pointer';
 
 	var dropper = document.createElement('img');
+	dropper.setAttribute('alt', '');
 	dropper.src = Editor.colorDropperImage;
 	dropper.className = 'geAdaptiveAsset';
 	dropper.style.position = 'relative';
@@ -1819,6 +1868,26 @@ ColorDialog.prototype.defaultColors = ['none', 'FFFFFF', 'E6E6E6', 'CCCCCC', 'B3
 		'330066', '660066', '660033', '330000', '331A00', '333300', '1A3300', '003300', '00331A', '003333', '001933', '000033', '190033', '330033', '33001A'];
 
 /**
+ * Returns true if black text has more contrast than white text on the given
+ * color, which is the case for a relative luminance above 0.179 (WCAG 2.x).
+ * Colors with an alpha of 0.3 or less count as light, like in isDarkColor.
+ */
+ColorDialog.hasDarkText = function(color)
+{
+	var rgb = mxUtils.parseColor(color);
+
+	var linear = function(value)
+	{
+		value /= 255;
+
+		return (value <= 0.04045) ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+	};
+
+	return rgb == null || rgb.a <= 0.3 || 0.2126 * linear(rgb.r) +
+		0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b) > 0.179;
+};
+
+/**
  * Creates function to apply value
  */
 ColorDialog.prototype.createApplyFunction = function()
@@ -1901,6 +1970,9 @@ var ColorWindow = function(editorUi, x, y, w)
 
 	this.window = new mxWindow('', container,
 		x, y, w, initH, true, true);
+	// Shown where other windows are hidden (see geInlineNoUi in grapheditor.css)
+	this.window.div.classList.add('geColorWindow');
+	this.window.table.classList.add('geColorWindow');
 	this.window.minimumSize = new mxRectangle(0, 0, 260, 200);
 	this.window.destroyOnClose = false;
 	this.window.setMaximizable(false);
@@ -1923,7 +1995,17 @@ var ColorWindow = function(editorUi, x, y, w)
 		var titleH = self.window.title.offsetHeight || titleHeight;
 		var contentH = container.scrollHeight;
 		var newH = titleH + contentH + self.window.contentHeightCorrection;
-		self.window.setSize(parseInt(self.window.div.style.width), newH);
+
+		// The window and its borders are no higher than the viewport, eg. an
+		// inline editor that is no higher than the diagram, and its content
+		// scrolls if the window is lower than the content
+		var div = self.window.div;
+		var border = Math.max(0, div.offsetHeight - parseInt(div.style.height)) || 0;
+		var maxH = (window.innerHeight || document.body.clientHeight ||
+			document.documentElement.clientHeight) - border;
+		self.window.minimumSize.height = Math.min(200, maxH);
+		self.window.setSize(parseInt(div.style.width), Math.min(newH, maxH));
+		self.window.contentWrapper.style.overflowY = (newH > maxH) ? 'auto' : '';
 		self.window.fit();
 	};
 
@@ -2321,6 +2403,11 @@ var TextareaDialog = function(editorUi, title, url, fn, cancelFn, cancelTitle, w
 	div.appendChild(top);
 
 	var nameInput = document.createElement('textarea');
+
+	if (title != null && title.length > 0)
+	{
+		nameInput.setAttribute('aria-label', title.replace(/:\s*$/, ''));
+	}
 
 	if (noWrap)
 	{
@@ -3752,6 +3839,9 @@ var EditDataDialog = function(ui, cell, optionalGraph)
 	container.style.height = '100%';
 	var graph = optionalGraph || ui.editor.graph;
 
+	// Names the dialog for screen readers as it has no title
+	container.setAttribute('aria-label', mxResources.get('editData'));
+
 	// Accepts an array of cells for editing the data of multiple
 	// cells at once, using the first cell as the reference cell
 	var cells = (cell instanceof Array) ? cell : [cell];
@@ -3943,7 +4033,8 @@ var EditDataDialog = function(ui, cell, optionalGraph)
 		{
 			if ((attrs[i].nodeName != 'label' || style['metaEdit'] == '1' ||
 				Graph.translateDiagram || isLayer) &&
-				attrs[i].nodeName != 'placeholders')
+				attrs[i].nodeName != 'placeholders' &&
+				!Graph.isDataSourceBaseAttribute(attrs[i].nodeName))
 			{
 				temp.push({name: attrs[i].nodeName, value: attrs[i].nodeValue});
 			}
@@ -4628,6 +4719,580 @@ var OutlineWindow = function(editorUi, x, y, w, h)
 };
 
 /**
+ * Window with the cells of the current page as a tree for screen readers and
+ * the keyboard, each with its description (see Graph.getCellDescription):
+ * the layers if there are more than one, the shapes in their containers and
+ * the connectors under the shape they start from. The selection follows the
+ * focus, Shift adds to the selection, Enter and Escape go back to the
+ * diagram. Only maxItems items are created, the others with Show More.
+ */
+var TextOutlineWindow = function(editorUi, x, y, w, h)
+{
+	var graph = editorUi.editor.graph;
+	var model = graph.getModel();
+	var maxItems = TextOutlineWindow.maxItems;
+	var collapsed = Object.create(null);
+	var items = Object.create(null);
+	var selected = [];
+	var entry = null;
+	var thread = null;
+	var dirty = true;
+	var search = '';
+	var searchTime = 0;
+
+	var div = document.createElement('div');
+	div.className = 'geTextOutline';
+
+	var tree = document.createElement('ul');
+	tree.setAttribute('role', 'tree');
+	tree.setAttribute('aria-label', mxResources.get('textOutline'));
+	tree.setAttribute('aria-multiselectable', 'true');
+	tree.setAttribute('tabindex', '-1');
+	div.appendChild(tree);
+
+	// Goes on with the first new item
+	var moreButton = mxUtils.button(mxResources.get('showMore'), function()
+	{
+		var count = getVisibleItems().length;
+		maxItems += TextOutlineWindow.maxItems;
+		refresh();
+
+		var next = getVisibleItems()[count];
+
+		if (next != null)
+		{
+			setEntry(next);
+			next.focus();
+		}
+	});
+	moreButton.className = 'geBtn';
+	div.appendChild(moreButton);
+
+	var empty = document.createElement('div');
+	empty.className = 'geTextOutlineEmpty';
+	mxUtils.write(empty, mxResources.get('noShapes'));
+	div.appendChild(empty);
+
+	this.window = new mxWindow(mxResources.get('textOutline'), div, x, y, w, h, true, true);
+	this.window.minimumSize = new mxRectangle(0, 0, 180, 120);
+	this.window.destroyOnClose = false;
+	this.window.setMaximizable(false);
+	this.window.setResizable(true);
+	this.window.setClosable(true);
+
+	// Returns the item of the given element
+	var getItem = function(elt)
+	{
+		while (elt != null && elt != tree)
+		{
+			if (elt.nodeType == mxConstants.NODETYPE_ELEMENT &&
+				elt.getAttribute('role') == 'treeitem')
+			{
+				return elt;
+			}
+
+			elt = elt.parentNode;
+		}
+
+		return null;
+	};
+
+	// Returns the items that are not in collapsed groups in their order
+	var getVisibleItems = function()
+	{
+		var result = [];
+
+		var visit = function(ul)
+		{
+			for (var li = ul.firstChild; li != null; li = li.nextSibling)
+			{
+				result.push(li);
+
+				if (li.getAttribute('aria-expanded') == 'true')
+				{
+					visit(li.lastChild);
+				}
+			}
+		};
+
+		visit(tree);
+
+		return result;
+	};
+
+	// Makes the given item the tab stop of the tree
+	var setEntry = function(li)
+	{
+		if (entry != null)
+		{
+			entry.setAttribute('tabindex', '-1');
+		}
+
+		entry = li;
+
+		if (entry != null)
+		{
+			entry.setAttribute('tabindex', '0');
+		}
+	};
+
+	// The group of the item is the last child
+	var setExpanded = function(li, expanded)
+	{
+		if (li.getAttribute('aria-expanded') != null)
+		{
+			li.setAttribute('aria-expanded', (expanded) ? 'true' : 'false');
+			li.lastChild.style.display = (expanded) ? '' : 'none';
+			collapsed[li.cell.id] = !expanded;
+		}
+	};
+
+	var toggleExpanded = function(li)
+	{
+		setExpanded(li, li.getAttribute('aria-expanded') == 'false');
+	};
+
+	// Layers have no selection
+	var selectItem = function(li, add)
+	{
+		setEntry(li);
+		li.focus();
+
+		if (!model.isLayer(li.cell))
+		{
+			if (add)
+			{
+				graph.addSelectionCell(li.cell);
+			}
+			else
+			{
+				graph.setSelectionCell(li.cell);
+			}
+
+			graph.scrollCellToVisible(li.cell);
+		}
+	};
+
+	var addText = function(parent, className, text)
+	{
+		var span = document.createElement('span');
+		span.className = className;
+		mxUtils.write(span, text);
+		parent.appendChild(span);
+	};
+
+	// The name of the item is the description, the row only shows the name
+	// and the kind of the cell, and the target of a connector under its
+	// source (see getRow)
+	var createItem = function(cell, text, level, source)
+	{
+		var li = document.createElement('li');
+		li.setAttribute('role', 'treeitem');
+		li.setAttribute('tabindex', '-1');
+		li.setAttribute('aria-label', text);
+		li.cell = cell;
+
+		if (model.isLayer(cell))
+		{
+			li.className = 'geTextOutlineLayer';
+		}
+		else
+		{
+			li.setAttribute('aria-selected', (graph.isCellSelected(cell)) ? 'true' : 'false');
+		}
+
+		var row = document.createElement('div');
+		row.className = 'geTextOutlineItem';
+		row.style.paddingLeft = (2 + level * 18) + 'px';
+		row.setAttribute('aria-hidden', 'true');
+		row.setAttribute('title', text);
+
+		var toggle = document.createElement('span');
+		toggle.className = 'geTextOutlineToggle';
+		row.appendChild(toggle);
+
+		var parts = getRow(cell, source);
+
+		if (parts.arrow)
+		{
+			addText(row, 'geTextOutlineArrow', '\u2192');
+		}
+
+		addText(row, 'geTextOutlineName', parts.name);
+
+		if (parts.kind.length > 0)
+		{
+			addText(row, 'geTextOutlineKind', parts.kind);
+		}
+
+		li.appendChild(row);
+		items[cell.id] = li;
+
+		return li;
+	};
+
+	// Name and kind of the given cell for its row, eg. the label and the
+	// shape, or the target and the label of a connector under its source
+	var getRow = function(cell, source)
+	{
+		if (model.isLayer(cell))
+		{
+			return {name: graph.getLayerName(cell), kind: mxResources.get('layer')};
+		}
+		else
+		{
+			var label = graph.getPlainLabel(cell, graph.maxDescriptionLabelLength);
+
+			if (model.isEdge(cell) && source)
+			{
+				return {name: graph.getCellName(graph.getTerminalForDescription(cell, false)),
+					kind: label, arrow: true};
+			}
+			else if (model.isEdge(cell))
+			{
+				return {name: (label.length > 0) ? label : graph.getCellTypeName(cell),
+					kind: mxResources.get('connectorFromTo', [
+						graph.getCellName(graph.getTerminalForDescription(cell, true)),
+						graph.getCellName(graph.getTerminalForDescription(cell, false))])};
+			}
+			else
+			{
+				var type = graph.getCellTypeName(cell);
+
+				return (label.length > 0) ? {name: label, kind: type} : {name: type, kind: ''};
+			}
+		}
+	};
+
+	var refresh = mxUtils.bind(this, function()
+	{
+		window.clearTimeout(thread);
+		thread = null;
+		dirty = false;
+
+		var focused = getItem(document.activeElement);
+		var focusedId = (focused != null) ? focused.cell.id : null;
+		var scrollTop = div.scrollTop;
+		var outline = graph.getTextOutline(maxItems);
+
+		var addItems = function(nodes, ul, level)
+		{
+			for (var i = 0; i < nodes.length; i++)
+			{
+				var li = createItem(nodes[i].cell, graph.getTextOutlineDescription(
+					nodes[i].cell), level, nodes[i].source);
+				ul.appendChild(li);
+
+				if (nodes[i].children.length > 0)
+				{
+					var group = document.createElement('ul');
+					group.setAttribute('role', 'group');
+					addItems(nodes[i].children, group, level + 1);
+
+					var chevron = document.createElement('img');
+					chevron.className = 'geAdaptiveAsset';
+					chevron.setAttribute('src', Editor.expandMoreImage);
+					li.firstChild.firstChild.appendChild(chevron);
+					li.appendChild(group);
+					li.setAttribute('aria-expanded', 'true');
+					setExpanded(li, !collapsed[nodes[i].cell.id]);
+				}
+			}
+		};
+
+		items = Object.create(null);
+		tree.textContent = '';
+		entry = null;
+
+		// Parses each label once, as the items name the cells that they
+		// connect to (see Graph.cachePlainLabels)
+		graph.cachePlainLabels(function()
+		{
+			addItems(outline.nodes, tree, 0);
+		});
+
+		moreButton.style.display = (outline.count < outline.total) ? '' : 'none';
+		empty.style.display = (tree.firstChild == null) ? '' : 'none';
+		selected = graph.getSelectionCells();
+
+		// Keeps the focus on the item of the same cell
+		var next = (focusedId != null) ? items[focusedId] : null;
+		var first = getFirstSelectedItem();
+		setEntry((next != null) ? next : ((first != null) ? first : tree.firstChild));
+
+		if (focused != null && entry != null)
+		{
+			entry.focus();
+		}
+
+		div.scrollTop = scrollTop;
+	});
+
+	var getFirstSelectedItem = function()
+	{
+		var cells = graph.getSelectionCells();
+
+		for (var i = 0; i < cells.length; i++)
+		{
+			if (items[cells[i].id] != null)
+			{
+				return items[cells[i].id];
+			}
+		}
+
+		return null;
+	};
+
+	var schedule = mxUtils.bind(this, function()
+	{
+		if (!this.window.isVisible())
+		{
+			dirty = true;
+		}
+		else if (thread == null)
+		{
+			// Once after all changes of an event
+			thread = window.setTimeout(refresh, 0);
+		}
+	});
+
+	var selectionChanged = mxUtils.bind(this, function()
+	{
+		if (!this.window.isVisible())
+		{
+			dirty = true;
+		}
+		else
+		{
+			for (var i = 0; i < selected.length; i++)
+			{
+				var li = items[selected[i].id];
+
+				if (li != null)
+				{
+					li.setAttribute('aria-selected', 'false');
+				}
+			}
+
+			selected = graph.getSelectionCells();
+
+			for (var i = 0; i < selected.length; i++)
+			{
+				var li = items[selected[i].id];
+
+				if (li != null)
+				{
+					li.setAttribute('aria-selected', 'true');
+				}
+			}
+
+			// Tab goes to the selection unless the tree has the focus
+			var first = getFirstSelectedItem();
+
+			if (first != null && getItem(document.activeElement) == null)
+			{
+				setEntry(first);
+			}
+		}
+	});
+
+	model.addListener(mxEvent.CHANGE, schedule);
+	graph.view.addListener(mxEvent.DOWN, schedule);
+	graph.view.addListener(mxEvent.UP, schedule);
+	graph.getSelectionModel().addListener(mxEvent.CHANGE, selectionChanged);
+
+	// Hidden tags change no model, they refresh the graph (refreshHiddenTags)
+	graph.addListener(mxEvent.REFRESH, schedule);
+
+	// The toggle in front of the name expands and collapses
+	mxEvent.addListener(tree, 'click', function(evt)
+	{
+		var source = mxEvent.getSource(evt);
+		var li = getItem(source);
+
+		if (li != null)
+		{
+			if (mxUtils.isAncestorNode(li.firstChild.firstChild, source))
+			{
+				setEntry(li);
+				li.focus();
+				toggleExpanded(li);
+			}
+			else
+			{
+				selectItem(li, mxEvent.isShiftDown(evt) ||
+					mxEvent.isControlDown(evt) || mxEvent.isMetaDown(evt));
+			}
+		}
+	});
+
+	mxEvent.addListener(tree, 'dblclick', function(evt)
+	{
+		var source = mxEvent.getSource(evt);
+		var li = getItem(source);
+
+		if (li != null && !mxUtils.isAncestorNode(li.firstChild.firstChild, source))
+		{
+			toggleExpanded(li);
+		}
+	});
+
+	mxEvent.addListener(tree, 'keydown', function(evt)
+	{
+		var li = getItem(mxEvent.getSource(evt));
+
+		// The shortcut of the window is only handled in the diagram
+		if (evt.keyCode == 85 /* U */ && mxEvent.isAltDown(evt) && mxEvent.isShiftDown(evt) &&
+			!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
+		{
+			editorUi.actions.get('textOutline').funct();
+			mxEvent.consume(evt);
+		}
+		else if (li != null && !mxEvent.isAltDown(evt) &&
+			!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
+		{
+			var visibleItems = getVisibleItems();
+			var index = mxUtils.indexOf(visibleItems, li);
+			var expanded = li.getAttribute('aria-expanded');
+			var handled = true;
+			var next = null;
+
+			if (evt.keyCode == 40 /* Down */)
+			{
+				next = visibleItems[index + 1];
+			}
+			else if (evt.keyCode == 38 /* Up */)
+			{
+				next = visibleItems[index - 1];
+			}
+			else if (evt.keyCode == 36 /* Home */)
+			{
+				next = visibleItems[0];
+			}
+			else if (evt.keyCode == 35 /* End */)
+			{
+				next = visibleItems[visibleItems.length - 1];
+			}
+			else if (evt.keyCode == 39 /* Right */)
+			{
+				if (expanded == 'false')
+				{
+					setExpanded(li, true);
+				}
+				else if (expanded == 'true')
+				{
+					next = li.lastChild.firstChild;
+				}
+			}
+			else if (evt.keyCode == 37 /* Left */)
+			{
+				if (expanded == 'true')
+				{
+					setExpanded(li, false);
+				}
+				else
+				{
+					next = getItem(li.parentNode);
+				}
+			}
+			else if (evt.keyCode == 32 /* Space */)
+			{
+				selectItem(li, mxEvent.isShiftDown(evt));
+			}
+			else if (evt.keyCode == 13 /* Enter */ || evt.keyCode == 27 /* Escape */)
+			{
+				graph.container.focus();
+			}
+			else if (evt.key != null && evt.key.length == 1 && evt.key != ' ')
+			{
+				// Goes to the next item that starts with the typed characters
+				var now = Date.now();
+				search = ((now - searchTime < 1000) ? search : '') + evt.key.toLowerCase();
+				searchTime = now;
+
+				for (var i = 1; i <= visibleItems.length && next == null; i++)
+				{
+					var temp = visibleItems[(index + ((search.length > 1) ? i - 1 : i)) % visibleItems.length];
+
+					if (temp.getAttribute('aria-label').toLowerCase().substring(0, search.length) == search)
+					{
+						next = temp;
+					}
+				}
+			}
+			else
+			{
+				handled = false;
+			}
+
+			if (next != null)
+			{
+				selectItem(next, mxEvent.isShiftDown(evt));
+			}
+
+			if (handled)
+			{
+				mxEvent.consume(evt);
+			}
+		}
+	});
+
+	this.window.addListener(mxEvent.SHOW, mxUtils.bind(this, function()
+	{
+		if (dirty)
+		{
+			refresh();
+		}
+
+		this.window.fit();
+	}));
+
+	// Keeps the focus of the keyboard if the window is hidden
+	this.window.addListener(mxEvent.HIDE, function()
+	{
+		if (document.activeElement == null || document.activeElement == document.body ||
+			mxUtils.isAncestorNode(div, document.activeElement))
+		{
+			graph.container.focus();
+		}
+	});
+
+	editorUi.installResizeHandler(this, true, function()
+	{
+		window.clearTimeout(thread);
+		model.removeListener(schedule);
+		graph.view.removeListener(schedule);
+		graph.removeListener(schedule);
+		graph.getSelectionModel().removeListener(selectionChanged);
+	});
+
+	/**
+	 * Moves the focus to the item of the selection or the first item.
+	 */
+	this.focus = function()
+	{
+		if (dirty)
+		{
+			refresh();
+		}
+
+		if (entry != null)
+		{
+			entry.focus();
+		}
+		else
+		{
+			tree.focus();
+		}
+	};
+};
+
+/**
+ * Number of items that the text outline creates at a time.
+ */
+TextOutlineWindow.maxItems = 1000;
+
+/**
  * 
  */
 var LayersWindow = function(editorUi, x, y, w, h)
@@ -4648,6 +5313,8 @@ var LayersWindow = function(editorUi, x, y, w, h)
 	listDiv.style.right = '0px';
 	listDiv.style.top = '0px';
 	listDiv.style.bottom = '32px';
+	listDiv.setAttribute('role', 'list');
+	listDiv.setAttribute('aria-label', mxResources.get('layers'));
 	div.appendChild(listDiv);
 	
 	var dragSource = null;
@@ -4676,6 +5343,20 @@ var LayersWindow = function(editorUi, x, y, w, h)
 	var layerCount = null;
 	var selectionLayer = null;
 	var layerDivs = new mxDictionary();
+
+	// The layers with their buttons are one tab stop for the keyboard (see
+	// Editor.createKeyboardGrid), F2 renames a layer
+	var keyboardGrid = Editor.createKeyboardGrid(listDiv, function(evt, control, layer)
+	{
+		var result = evt.keyCode == 113 /* F2 */ && graph.isEnabled();
+
+		if (result)
+		{
+			renameLayer(layer);
+		}
+
+		return result;
+	});
 	var ldiv = document.createElement('div');
 	ldiv.className = 'geToolbarContainer geDialogToolbar';
 	
@@ -4715,6 +5396,7 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		addLink.classList.add('mxDisabled');
 	}
 	
+	editorUi.initKeyboardButton(addLink);
 	ldiv.appendChild(addLink);
 	
 	function renameLayer(layer)
@@ -4789,6 +5471,8 @@ var LayersWindow = function(editorUi, x, y, w, h)
 	
 	var menuLink = link.cloneNode(false);
 	menuLink.style.backgroundImage = 'url(' + Editor.menuImage + ')';
+	menuLink.setAttribute('title', mxResources.get('options'));
+	editorUi.initKeyboardButton(menuLink);
 	ldiv.appendChild(menuLink);
 
 	function isLayersVisible(layers)
@@ -5082,10 +5766,27 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		
 			var x = mxEvent.getClientX(evt);
 			var y = mxEvent.getClientY(evt);
+
+			// Opens the menu at the button with the focus on its first item for a
+			// click with the keyboard (see Editor.clickWithKeyboard)
+			if (evt.detail == 0)
+			{
+				var bounds = menuLink.getBoundingClientRect();
+				x = bounds.left;
+				y = bounds.top;
+			}
+
 			menu.popup(x, y, null, evt);
 			
 			// Allows hiding by clicking on document
 			editorUi.setCurrentMenu(menu);
+
+			if (evt.detail == 0)
+			{
+				menu.returnFocus = menuLink;
+				menu.focusFirstItem();
+			}
+
 			mxEvent.consume(evt);
 		}
 	});
@@ -5146,6 +5847,7 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		removeLink.classList.add('mxDisabled');
 	}
 
+	editorUi.initKeyboardButton(removeLink);
 	div.appendChild(ldiv);
 	
 	var dot = document.createElement('span');
@@ -5185,6 +5887,7 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		}
 
 		layerCount = model.getChildCount(model.root)
+		keyboardGrid.begin();
 		listDiv.innerText = '';
 		var newLayerDivs = new mxDictionary();
 		
@@ -5449,7 +6152,23 @@ var LayersWindow = function(editorUi, x, y, w, h)
 					mxEvent.consume(evt);
 				}
 			});
-			
+
+			ldiv.setAttribute('role', 'listitem');
+			inp.setAttribute('role', 'button');
+			inp.setAttribute('aria-label', mxResources.get(visible ? 'hide' : 'show'));
+			btn.setAttribute('role', 'button');
+			btn.setAttribute('aria-label', mxResources.get('lockUnlock'));
+			btn.setAttribute('aria-pressed', (locked) ? 'true' : 'false');
+			title.setAttribute('role', 'button');
+			cb.setAttribute('aria-label', mxResources.get('select'));
+
+			if (graph.getDefaultParent() == child)
+			{
+				title.setAttribute('aria-current', 'true');
+			}
+
+			keyboardGrid.addRow(child, (graph.isEnabled()) ?
+				[inp, btn, title, cb] : [inp, btn, title]);
 			listDiv.appendChild(ldiv);
 		};
 		
@@ -5464,6 +6183,7 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		}
 
 		layerDivs = newLayerDivs;
+		keyboardGrid.end(selectionLayer, 2);
 		updateLayerDot();
 	};
 

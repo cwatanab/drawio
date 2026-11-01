@@ -806,6 +806,41 @@ LibavoidRouting.installAutoRouting = function(editorUi)
 
 		return handler;
 	};
+
+	// The box of a multi-selection (Graph.MultiSelectionHandler) previews the
+	// routes of the auto-edges that a resize re-routes on mouse up through the
+	// events above (addResizePreviewRoutes). Checked as the core can be older
+	// than the extensions. Never lets a preview route break the gesture.
+	var createMultiSelectionHandler = graph.createMultiSelectionHandler;
+
+	if (createMultiSelectionHandler != null)
+	{
+		graph.createMultiSelectionHandler = function(cells)
+		{
+			var handler = createMultiSelectionHandler.apply(this, arguments);
+			var resetPreview = handler.resetPreview;
+
+			handler.addPreviewGeometries = function(geometries)
+			{
+				try
+				{
+					return LibavoidRouting.addResizePreviewRoutes(graph, this, geometries);
+				}
+				catch (e)
+				{
+					return null;
+				}
+			};
+
+			handler.resetPreview = function()
+			{
+				LibavoidRouting.endResizePreview(this);
+				resetPreview.apply(this, arguments);
+			};
+
+			return handler;
+		};
+	}
 };
 
 /**
@@ -856,20 +891,21 @@ LibavoidRouting.collectOverlappingEdges = function(graph, regions, map, edgeBoun
 /**
  * The auto-edges of the model that are not in the optional skip map (by id)
  * with their route bounds (edgeRouteBounds) as an array of {cell, bounds}.
- * Edges without route bounds are left out.
+ * Edges without route bounds are left out. The edges are in the order of
+ * model.cells (see getFlaggedCells).
  */
 LibavoidRouting.getAutoEdgeBounds = function(graph, skip)
 {
 	var model = graph.getModel();
-	var flagged = LibavoidRouting.createStyleFilter(graph, [LibavoidRouting.STYLE]);
+	var index = LibavoidRouting.getFlaggedCells(graph);
 	var result = [];
 
-	for (var id in model.cells)
+	for (var id in index.cells)
 	{
-		var c = model.cells[id];
+		var c = index.cells[id];
 
-		if ((skip == null || skip[id] == null) && model.isEdge(c) &&
-			flagged(c) && LibavoidRouting.isAutoEdge(graph, c))
+		if (model.getCell(id) == c && (skip == null || skip[id] == null) && model.isEdge(c) &&
+			index.flagged(c) && LibavoidRouting.isAutoEdge(graph, c))
 		{
 			var bb = LibavoidRouting.edgeRouteBounds(graph, c);
 
@@ -884,6 +920,162 @@ LibavoidRouting.getAutoEdgeBounds = function(graph, skip)
 };
 
 /**
+ * Returns the cells that the walks over the auto-edges look at
+ * (getAutoEdgeBounds) as {cells, flagged}: the cells of the model whose style
+ * names the routing flag by ID in the order of model.cells, or model.cells if
+ * a style of the stylesheet sets the flag, and the filter for the flag
+ * (createStyleFilter). The walks visited all cells for each insert, which
+ * made a burst of inserts in one edit quadratic (eg. a CSV import adds one
+ * cell after the other). The list follows the changes of the model (see
+ * installFlaggedCells) and is created again for a new model.cells (a new
+ * root, also the same root again after a page switch, as model.cells then
+ * has the order of the cells in the tree) and if the stylesheet starts or
+ * stops setting the flag. It may contain cells that are no longer in the
+ * model or no longer have the flag.
+ */
+LibavoidRouting.getFlaggedCells = function(graph)
+{
+	var model = graph.getModel();
+
+	if (LibavoidRouting.isStylesheetKey(graph, [LibavoidRouting.STYLE]))
+	{
+		return {cells: model.cells, flagged: function()
+		{
+			return true;
+		}};
+	}
+
+	var index = graph.__libavoidFlaggedCells;
+
+	if (index == null || index.lookup != model.cells)
+	{
+		LibavoidRouting.installFlaggedCells(graph);
+		index = {lookup: model.cells, cells: Object.create(null),
+			flagged: LibavoidRouting.createStyleFilter(graph, [LibavoidRouting.STYLE])};
+
+		for (var id in model.cells)
+		{
+			if (index.flagged(model.cells[id]))
+			{
+				index.cells[id] = model.cells[id];
+			}
+		}
+
+		graph.__libavoidFlaggedCells = index;
+	}
+
+	return index;
+};
+
+/**
+ * Keeps the flagged cells of the given graph (getFlaggedCells) in the order of
+ * model.cells for each change that the model executes, also for undo and
+ * redo (EXECUTED): an added cell and its descendants go to the end of both in
+ * the order of cellAdded, removed cells are deleted. The list is created again
+ * if a cell in the model gets the flag, as its place in model.cells is not
+ * known, and for other changes than those of the cells (eg. a new ID).
+ */
+LibavoidRouting.installFlaggedCells = function(graph)
+{
+	if (graph.__libavoidFlaggedCellsInstalled)
+	{
+		return;
+	}
+
+	graph.__libavoidFlaggedCellsInstalled = true;
+	var model = graph.getModel();
+
+	// Adds the flagged cells of the given cell that was added to the model or
+	// deletes the cells of a removed cell, without recursion
+	var update = function(index, cell, added)
+	{
+		var stack = [cell];
+
+		while (stack.length > 0)
+		{
+			var c = stack.pop();
+			var id = c.getId();
+
+			if (!added)
+			{
+				if (index.cells[id] == c)
+				{
+					delete index.cells[id];
+				}
+			}
+			else if (index.cells[id] == null && index.flagged(c))
+			{
+				index.cells[id] = c;
+			}
+
+			for (var i = model.getChildCount(c) - 1; i >= 0; i--)
+			{
+				stack.push(model.getChildAt(c, i));
+			}
+		}
+	};
+
+	model.addListener(mxEvent.EXECUTED, function(sender, evt)
+	{
+		var index = graph.__libavoidFlaggedCells;
+		var change = evt.getProperty('change');
+
+		if (index != null && index.lookup == model.cells)
+		{
+			if (change instanceof mxChildChange)
+			{
+				// Cells that are moved in the model keep their places in model.cells
+				var child = change.child;
+				var added = child != null && model.getCell(child.getId()) == child;
+
+				if (child != null && added != (change.previous != null &&
+					model.contains(change.previous)))
+				{
+					update(index, child, added);
+				}
+			}
+			else if (change instanceof mxStyleChange)
+			{
+				var cell = change.cell;
+
+				if (cell != null && index.cells[cell.getId()] != cell &&
+					model.getCell(cell.getId()) == cell && index.flagged(cell))
+				{
+					graph.__libavoidFlaggedCells = null;
+				}
+			}
+			else if (!(change instanceof mxGeometryChange || change instanceof mxValueChange ||
+				change instanceof mxTerminalChange || change instanceof mxCollapseChange ||
+				change instanceof mxVisibleChange || change instanceof mxCellAttributeChange))
+			{
+				graph.__libavoidFlaggedCells = null;
+			}
+		}
+	});
+};
+
+/**
+ * Returns true if a style of the stylesheet sets one of the given keys.
+ */
+LibavoidRouting.isStylesheetKey = function(graph, keys)
+{
+	var styles = graph.getStylesheet().styles;
+
+	for (var name in styles)
+	{
+		for (var i = 0; i < keys.length; i++)
+		{
+			if (styles[name] != null && styles[name][keys[i]] != null)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+};
+
+/**
  * A function that returns false for a cell whose style (getCellStyle) sets
  * none of the given keys, without resolving the style. A resolved style takes
  * its keys only from the style string of the cell and from the styles of the
@@ -895,21 +1087,12 @@ LibavoidRouting.getAutoEdgeBounds = function(graph, skip)
  */
 LibavoidRouting.createStyleFilter = function(graph, keys)
 {
-	var styles = graph.getStylesheet().styles;
-	var i;
-
-	for (var name in styles)
+	if (LibavoidRouting.isStylesheetKey(graph, keys))
 	{
-		for (i = 0; i < keys.length; i++)
+		return function()
 		{
-			if (styles[name] != null && styles[name][keys[i]] != null)
-			{
-				return function()
-				{
-					return true;
-				};
-			}
-		}
+			return true;
+		};
 	}
 
 	var model = graph.getModel();
@@ -1488,17 +1671,36 @@ LibavoidRouting.snapPoints = function(graph, terminal, edgeStyle, terminalStyle)
 	// The auto-routing solves before the view is revalidated (at BEFORE_UNDO),
 	// when the view state can still hold the points and shape from before the
 	// edit (eg. after Edit Style), so the constraints come from the given style
-	// and a shape at the routing size. The rendered shape is the prototype if
-	// the shape name is the same, as some shapes only declare their
-	// constraints when painted (mxgraph.bpmn.shape).
+	// and a shape at the routing size. The rendered shape is copied if the
+	// shape name is the same, as some shapes only declare their constraints
+	// when painted (mxgraph.bpmn.shape).
 	var view = graph.view.getState(terminal);
 	var state = new mxCellState(graph.view, terminal, terminalStyle);
+	// Constraints computed from the outline of the shape use the size of the
+	// state (Graph.getOutlineConstraints)
+	state.width = b.w * graph.view.scale;
+	state.height = b.h * graph.view.scale;
+	// The copy of the rendered shape has the styles from before the edit and
+	// a new shape has none, but the points along the outline of the shape
+	// depend on them (Graph.getOutlineConstraints), so the shape of an
+	// outline perimeter is configured for the given style as the renderer
+	// does after a change of the style. Its copy has the fields of the
+	// rendered shape as its own, so that resetStyles restores the defaults of
+	// the keys that the style does not have.
+	var outline = graph.isOutlinePerimeter != null && graph.isOutlinePerimeter(state);
 	state.shape = (view != null && view.shape != null && view.style != null &&
 		view.style[mxConstants.STYLE_SHAPE] == terminalStyle[mxConstants.STYLE_SHAPE]) ?
-		Object.create(view.shape) : graph.cellRenderer.createShape(state);
+		((outline) ? Object.assign(Object.create(Object.getPrototypeOf(view.shape)), view.shape) :
+		Object.create(view.shape)) : graph.cellRenderer.createShape(state);
 
 	if (state.shape != null)
 	{
+		if (outline)
+		{
+			state.shape.resetStyles();
+			graph.cellRenderer.configureShape(state);
+		}
+
 		state.shape.direction = mxUtils.getValue(terminalStyle,
 			mxConstants.STYLE_DIRECTION, mxConstants.DIRECTION_EAST);
 		state.shape.bounds = new mxRectangle(0, 0, b.w, b.h);
@@ -1685,7 +1887,7 @@ LibavoidRouting.samePoints = function(a, b)
  */
 LibavoidRouting.danglingPoint = function(graph, edge, source)
 {
-	var geo = graph.getModel().getGeometry(edge);
+	var geo = graph.getCellGeometry(edge);
 	var p = (geo != null) ? geo.getTerminalPoint(source) : null;
 
 	if (p == null)
@@ -2083,7 +2285,7 @@ LibavoidRouting.getAbsoluteParentOffset = function(graph, cell)
 
 	while (p != null && (model.isVertex(p) || model.isEdge(p)))
 	{
-		var pg = model.isVertex(p) ? model.getGeometry(p) : null;
+		var pg = model.isVertex(p) ? graph.getCellGeometry(p) : null;
 
 		if (pg != null)
 		{
@@ -2122,7 +2324,7 @@ LibavoidRouting.getGeometryOrigin = function(graph, cell, geo)
 	{
 		var parent = graph.getModel().getParent(cell);
 		var size = graph.isTransparentBounds(parent) ?
-			graph.getTransparentBounds(parent) : graph.getModel().getGeometry(parent);
+			graph.getTransparentBounds(parent) : graph.getCellGeometry(parent);
 		var offset = (geo.offset != null) ? geo.offset : new mxPoint();
 
 		return {x: geo.x * ((size != null) ? size.width : 0) + offset.x,
@@ -2204,7 +2406,7 @@ LibavoidRouting.isOnEdge = function(graph, cell)
  */
 LibavoidRouting.getAbsoluteModelBounds = function(graph, cell)
 {
-	var geo = graph.getModel().getGeometry(cell);
+	var geo = graph.getCellGeometry(cell);
 
 	if (geo == null || LibavoidRouting.isOnEdge(graph, cell))
 	{
@@ -2640,7 +2842,7 @@ LibavoidRouting.edgeRouteBounds = function(graph, edge)
 	var minX = Math.min(scx, tcx), maxX = Math.max(scx, tcx);
 	var minY = Math.min(scy, tcy), maxY = Math.max(scy, tcy);
 
-	var geo = model.getGeometry(edge);
+	var geo = graph.getCellGeometry(edge);
 
 	if (geo != null && geo.points != null)
 	{
@@ -3870,6 +4072,240 @@ LibavoidRouting.endMovePreview = function(handler)
 	if (any)
 	{
 		view.validate();
+	}
+};
+
+/**
+ * The parts of the preview of a resize of the box of a multi-selection
+ * (addResizePreviewRoutes) that only depend on the model, collected once per
+ * gesture like getMovePreviewCache: the vertices that the box changes (the
+ * cells of the box and their descendants) with their obstacle bounds before
+ * the resize and their indices in the obstacles, their connected auto-edges,
+ * the route bounds of the other auto-edges (getAutoEdgeBounds) with the
+ * indices of the edges that the box changes, and the obstacles
+ * (collectVertices), which are null if there are no auto-edges to route.
+ * Stored in handler.__libavoidResizeCache until the model changes or the
+ * preview ends (endResizePreview).
+ */
+LibavoidRouting.getResizePreviewCache = function(graph, handler)
+{
+	var cache = handler.__libavoidResizeCache;
+
+	if (cache == null)
+	{
+		var model = graph.getModel();
+		var handled = [];
+		var connected = Object.create(null);
+		var hasEdges = false;
+		var i, j, k;
+
+		for (i = 0; i < handler.cells.length; i++)
+		{
+			var cells = model.getDescendants(handler.cells[i]);
+
+			for (j = 0; j < cells.length; j++)
+			{
+				if (model.isVertex(cells[j]))
+				{
+					var edges = model.getEdges(cells[j]);
+					handled.push({cell: cells[j]});
+
+					for (k = 0; k < edges.length; k++)
+					{
+						if (LibavoidRouting.isAutoEdge(graph, edges[k]))
+						{
+							connected[edges[k].getId()] = edges[k];
+							hasEdges = true;
+						}
+					}
+				}
+			}
+		}
+
+		cache = {handled: handled, connected: connected, handledEdges: [],
+			edgeBounds: LibavoidRouting.getAutoEdgeBounds(graph, connected),
+			vertices: null};
+
+		if (hasEdges || cache.edgeBounds.length > 0)
+		{
+			var vertices = LibavoidRouting.collectVertices(graph);
+			var index = Object.create(null);
+			cache.framed = LibavoidRouting.createStyleFilter(graph, LibavoidRouting.frameStyles);
+			cache.labelled = LibavoidRouting.createStyleFilter(graph, ['labelPerimeter']);
+
+			for (i = 0; i < vertices.length; i++)
+			{
+				index[vertices[i].id] = i;
+			}
+
+			for (i = 0; i < handled.length; i++)
+			{
+				handled[i].index = index[handled[i].cell.getId()];
+				handled[i].bounds = AvoidRouting.obstacleBounds(LibavoidRouting.getVertex(
+					graph, handled[i].cell, cache.framed, cache.labelled));
+			}
+
+			for (i = 0; i < cache.edgeBounds.length; i++)
+			{
+				if (handler.isCellHandled(cache.edgeBounds[i].cell))
+				{
+					cache.handledEdges.push(i);
+				}
+			}
+
+			cache.vertices = vertices;
+		}
+
+		cache.listener = function()
+		{
+			model.removeListener(cache.listener);
+
+			if (handler.__libavoidResizeCache === cache)
+			{
+				handler.__libavoidResizeCache = null;
+			}
+		};
+
+		model.addListener(mxEvent.CHANGE, cache.listener);
+		handler.__libavoidResizeCache = cache;
+	}
+
+	return cache;
+};
+
+/**
+ * Adds the routes of the auto-edges that a resize of the box of a
+ * multi-selection re-routes (Graph.MultiSelectionHandler) to the given
+ * geometries of its preview and returns the edges, or null without the
+ * routing module or auto-edges. The vertices that the box changes are taken
+ * like the cells of the CELLS_RESIZED and cellsArranged of the resize
+ * (onMoveResize in installAutoRouting): their connected auto-edges and those
+ * whose route overlaps their box before or after the resize are routed
+ * around the obstacles after the resize. The routing reads the geometries of
+ * the preview as Graph.previewGeometries, which getCellGeometry returns
+ * instead of the geometries in the model, so the input is the one of
+ * routeCells after the resize and the preview shows the routes of the mouse
+ * up. Wired from the addPreviewGeometries of the box (installAutoRouting),
+ * which runs before the geometries are set as Graph.previewGeometries.
+ */
+LibavoidRouting.addResizePreviewRoutes = function(graph, handler, geometries)
+{
+	var cache = (typeof window !== 'undefined' && window.Avoid != null) ?
+		LibavoidRouting.getResizePreviewCache(graph, handler) : null;
+	var result = null;
+
+	if (cache != null && cache.vertices != null)
+	{
+		var preview = graph.previewGeometries;
+		graph.previewGeometries = geometries;
+
+		try
+		{
+			var map = Object.create(null);
+			var vertices = cache.vertices.slice();
+			var edgeBounds = cache.edgeBounds;
+			var regions = [];
+			var id, i;
+
+			for (id in cache.connected)
+			{
+				map[id] = cache.connected[id];
+			}
+
+			// Obstacles after the resize and the areas they leave or cover
+			for (i = 0; i < cache.handled.length; i++)
+			{
+				var h = cache.handled[i];
+				var v = LibavoidRouting.getVertex(graph, h.cell, cache.framed, cache.labelled);
+				var nb = AvoidRouting.obstacleBounds(v);
+
+				if (h.index != null && v != null)
+				{
+					vertices[h.index] = v;
+				}
+
+				if (nb != null)
+				{
+					var ob = (h.bounds != null) ? h.bounds : nb;
+					var x = Math.min(ob.x, nb.x), y = Math.min(ob.y, nb.y);
+					regions.push({x: x, y: y,
+						width: Math.max(ob.x + ob.w, nb.x + nb.w) - x,
+						height: Math.max(ob.y + ob.h, nb.y + nb.h) - y});
+				}
+			}
+
+			// Route bounds of the edges that the box changes after the resize
+			if (cache.handledEdges.length > 0)
+			{
+				edgeBounds = edgeBounds.slice();
+
+				for (i = 0; i < cache.handledEdges.length; i++)
+				{
+					var e = edgeBounds[cache.handledEdges[i]];
+					var bb = LibavoidRouting.edgeRouteBounds(graph, e.cell);
+
+					if (bb != null)
+					{
+						edgeBounds[cache.handledEdges[i]] = {cell: e.cell, bounds: bb};
+					}
+				}
+			}
+
+			LibavoidRouting.collectOverlappingEdges(graph, regions, map, edgeBounds);
+			var cells = [];
+
+			for (id in map)
+			{
+				cells.push(map[id]);
+			}
+
+			var byId = Object.create(null);
+			var edges = LibavoidRouting.createRouteEdges(graph, vertices, cells, byId);
+			var routes = (edges.length > 0) ? LibavoidRouting.routeEdgeSet(
+				window.Avoid, vertices, edges, null) : Object.create(null);
+			result = [];
+
+			// Bends in the frame of the parent of the edge as in routeCells
+			for (id in routes)
+			{
+				var edge = byId[id];
+				var off = LibavoidRouting.getAbsoluteParentOffset(graph, edge);
+				var geo = graph.getCellGeometry(edge);
+				var pts = [];
+
+				for (i = 0; i < routes[id].length; i++)
+				{
+					pts.push(new mxPoint(routes[id][i].x - off.x, routes[id][i].y - off.y));
+				}
+
+				geo = (geo != null) ? geo.clone() : new mxGeometry();
+				geo.points = (pts.length > 0) ? pts : null;
+				geometries.put(edge, geo);
+				result.push(edge);
+			}
+		}
+		finally
+		{
+			graph.previewGeometries = preview;
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Drops the cache of the preview of a resize of the box of a multi-selection
+ * (getResizePreviewCache). Wired from the resetPreview of the box
+ * (installAutoRouting), which runs at the end of each gesture.
+ */
+LibavoidRouting.endResizePreview = function(handler)
+{
+	var cache = handler.__libavoidResizeCache;
+
+	if (cache != null)
+	{
+		handler.graph.getModel().removeListener(cache.listener);
+		handler.__libavoidResizeCache = null;
 	}
 };
 

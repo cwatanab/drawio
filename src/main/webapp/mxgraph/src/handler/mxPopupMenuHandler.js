@@ -230,6 +230,23 @@ mxPopupMenuHandler.prototype.getCellForPopupEvent = function(me)
 };
 
 /**
+ * Function: documentKeyDown
+ *
+ * Returns the focus to the container of the graph instead of an element in
+ * it, eg. a text field for typing that is removed with the selection.
+ */
+mxPopupMenuHandler.prototype.documentKeyDown = function(evt)
+{
+	if (this.returnFocus == null && this.isMenuShowing() && !this.isTextInputEvent(evt) &&
+		mxUtils.isAncestorNode(this.graph.container, mxEvent.getSource(evt)))
+	{
+		this.returnFocus = this.graph.container;
+	}
+
+	mxPopupMenu.prototype.documentKeyDown.apply(this, arguments);
+};
+
+/**
  * Function: destroy
  * 
  * Destroys the handler and all its resources and DOM nodes.

@@ -1499,20 +1499,18 @@ mxShapeInfographicPopover.prototype.getConstraints = function(style, w, h)
 	var constr = [];
 	var dx = Math.max(0, Math.min(w, parseFloat(mxUtils.getValue(this.style, 'dx', this.dx))));
 	var dy = Math.max(0, Math.min(h, parseFloat(mxUtils.getValue(this.style, 'dy', this.dy))));
-	var x1 = Math.max(dx - dy * 0.35, 0);
-	var x2 = Math.min(dx + dy * 0.35, w);
 
 	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(0.25, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(0.5, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(0.75, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w, (h - dy) * 0.5));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w, h - dy));
-	constr.push(new mxConnectionConstraint(new mxPoint(0.75, 0), false, null, 0, h - dy));
-	constr.push(new mxConnectionConstraint(new mxPoint(0.25, 0), false, null, 0, h - dy));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, dx, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, 0, h - dy));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0.5), false, null, 0, -dy * 0.5));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 1), false, null, 0, -dy));
+	constr.push(new mxConnectionConstraint(new mxPoint(0.75, 1), false, null, 0, -dy));
+	constr.push(new mxConnectionConstraint(new mxPoint(0.25, 1), false, null, 0, -dy));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, dx, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, 0, -dy));
 
 	return (constr);
 };

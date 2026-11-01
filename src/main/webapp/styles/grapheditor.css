@@ -261,8 +261,9 @@ div[id*="dgeMermaidOutput-"] {
 	margin-left: 0;
 }
 
+/* The color window of the inline toolbar stays */
 .geInlineNoUi .geToolbarContainer,
-.geInlineNoUi .mxWindow {
+.geInlineNoUi .mxWindow:not(.geColorWindow) {
 	display: none !important;
 }
 
@@ -435,7 +436,7 @@ div[id*="dgeMermaidOutput-"] {
 .geDarkMode .geBtnStepper>div,
 .geDarkMode .geColorDropper,
 .geDarkMode .geStyleMenuItem,
-.geDarkMode .gePropHeader>.gePropHeaderCell,
+.geDarkMode .gePropHeader>.gePropHeaderCell:first-child,
 .geDarkMode .geStyleBtn .geAdaptiveAsset.geArrow,
 .geAtlas .geMenubar .geButtonContainer .geButton:empty,
 .geAtlas .geMenubar .geButtonContainer .geButton:has(> span.geCommentsBadge:only-child),
@@ -443,6 +444,22 @@ div[id*="dgeMermaidOutput-"] {
 .geAtlas .geMenubar .geButtonContainer .geButton img:last-child {
 	filter: invert(1);
 	outline: none;
+}
+
+/* Keyboard focus ring of the inverted controls above: the inverse of the focus
+   color shows the focus color, else the color of the control is used. The
+   outline shows in forced colors. */
+.geDarkMode .geButton:focus-visible,
+.geDarkMode .geHelpIcon:not(.geTitle *):focus-visible,
+.geDarkMode .geAdaptiveAsset:focus-visible,
+.geDarkMode .geTitle:focus-visible,
+.geDarkMode .geTitle.geFocusRing,
+.geDarkMode .geTitle .geLibraryButton:focus-visible,
+.geDarkMode .gePropHeader>.gePropHeaderCell:focus-visible,
+.geAtlas .geMenubar .geButtonContainer .geButton:empty:focus-visible,
+.geAtlas .geMenubar .geButtonContainer .geButton:has(> span.geCommentsBadge:only-child):focus-visible {
+	outline: 2px solid currentColor;
+	outline: 2px solid rgb(from var(--dark-focus-color) calc(255 - r) calc(255 - g) calc(255 - b));
 }
 
 /* Cancels out the inversion for the badge in the atlas menubar */
@@ -517,7 +534,8 @@ div[id*="dgeMermaidOutput-"] {
 	width: 20px !important;
 }
 
-.gePageTab:hover {
+.gePageTab:hover,
+.gePageGroupTab:hover {
 	background-color: light-dark(var(--highlight-color), var(--dark-border-color));
 	opacity: 1;
 }
@@ -558,12 +576,13 @@ div.geActivePage:hover {
 	position: relative;
 }
 
+/* The dots are 24px apart, the spacing of small targets in WCAG 2.5.8 */
 .geSwitcher>.geSwitcherDot {
 	display: inline-block;
 	width: 6px;
 	height: 6px;
-	margin-left: 4px;
-	margin-right: 3px;
+	margin-left: 8px;
+	margin-right: 8px;
 	border-radius: 3px;
 	cursor: pointer;
 	border: 1px solid rgb(181, 182, 183);
@@ -742,6 +761,13 @@ html table.mxPopupMenu td.mxPopupMenuItem {
 html tr.mxPopupMenuItem,
 html td.mxPopupMenuItem {
 	transition-property: none !important;
+}
+
+/* Menu items with the keyboard focus have the hover style (see
+   mxPopupMenu.addItem), the outline shows in forced colors */
+table.mxPopupMenu tr:focus {
+	outline: 1px solid transparent;
+	outline-offset: -1px;
 }
 
 html body td.mxWindowTitle {
@@ -982,7 +1008,20 @@ div td.mxWindowTitle {
 	height: 22px;
 }
 
-.mxWindowTitle>div>img {
+/* The title buttons are 24px targets (WCAG 2.5.8) with the icon in the middle,
+   and the margin keeps the height they had with a padding of 4px */
+.mxWindowTitle>div>img:not(.geHelpIcon) {
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	margin-top: -3px;
+	margin-bottom: -3px;
+	object-fit: none;
+}
+
+/* Help icons in titles, eg. of the AI window, are 16px with the padding of a
+   24px target */
+.mxWindowTitle>div>img.geHelpIcon {
 	padding: 4px;
 }
 
@@ -1131,6 +1170,24 @@ div.geFormatContainer {
 	background-color: light-dark(var(--workspace-color), var(--ge-dark-panel-color));
 	font-size: 0px;
 	outline: none;
+}
+
+/* Diagram that got the focus with the keyboard (see EditorUi.init). A sticky
+   overlay as the canvas covers outlines inside of the diagram and the panels
+   cover outlines outside of it. The outline shows in forced colors. */
+.geDiagramContainer.geFocusVisible::before {
+	content: '';
+	display: block;
+	position: sticky;
+	z-index: 1;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	box-shadow: inset 0 0 0 2px light-dark(var(--focus-color), var(--dark-focus-color));
+	outline: 2px solid transparent;
+	outline-offset: -2px;
+	pointer-events: none;
 }
 
 .geDiagramContainer.geRulerContainer {
@@ -1344,6 +1401,37 @@ html body div.geBtn.geSmallBanner {
 	box-shadow: 0px 1px 1px rgba(0, 0, 0, 0.1);
 }
 
+/* Keyboard focus ring of buttons, eg. More Shapes and the buttons of dialogs:
+   an outline in the focus color that also shows next to primary buttons and in
+   dark mode, which removes all shadows, inside of the button so that areas
+   that scroll do not clip it, eg. the content of dialogs */
+.geBtn:focus-visible,
+.geCollapsibleTitle:focus-visible,
+.geTab:focus-visible,
+.geFormatTitle:focus-visible,
+.geGraphStylePreview:focus-visible {
+	outline: 2px solid light-dark(var(--focus-color), var(--dark-focus-color));
+	outline-offset: -2px;
+}
+
+/* The page tabs clip the ring of their menu button */
+.gePageTab .geButton:focus-visible,
+.gePageGroupTab .geButton:focus-visible {
+	outline-offset: -2px;
+}
+
+/* Keyboard focus of a label that stands for its container, which also contains
+   other controls, eg. the name of a page tab or of a library (see
+   Editor.addFocusRing) */
+.geFocusRing {
+	outline: 2px solid light-dark(var(--focus-color), var(--dark-focus-color));
+	outline-offset: -2px;
+}
+
+.geFocusLabel:focus-visible {
+	outline: none;
+}
+
 .geShapePicker {
 	position: absolute;
 	width: 142px;
@@ -1550,6 +1638,11 @@ td.mxPopupMenuIcon .geStyleMenuItem>div {
 	opacity: 0.65;
 }
 
+/* Shows the keyboard focus ring of buttons at full strength like the hover */
+.geEditor .geButton:focus-visible:not(.mxDisabled, .mxDisabled *, [disabled]) {
+	opacity: 1;
+}
+
 .geItem:hover:not(.mxDisabled, [disabled]),
 .geBtn:hover:not([disabled]),
 .geBtnStepper>div:hover,
@@ -1581,7 +1674,8 @@ table.mxPopupMenu tr.mxPopupMenuItemHover,
 	visibility: hidden;
 }
 
-.gePageTab.gePageTabDragPlaceholder {
+.gePageTab.gePageTabDragPlaceholder,
+.gePageGroupTab.gePageTabDragPlaceholder {
 	visibility: hidden;
 }
 
@@ -1910,6 +2004,26 @@ a.geStatus>div {
 	font-weight: bold;
 }
 
+/* Icon that a style rule of the page sets the value of a Format panel entry
+   (BaseFormatPanel.addStyleRuleHint), which opens the rules when clicked */
+.geStyleRuleHint {
+	display: inline-flex;
+	align-items: center;
+	margin-left: 4px;
+	vertical-align: middle;
+	flex-shrink: 0;
+	color: light-dark(var(--secondary-text-color), var(--dark-secondary-text-color));
+}
+
+.geStyleRuleHint[role="button"]:hover {
+	color: light-dark(var(--focus-color), var(--dark-focus-color));
+}
+
+/* The title has a gap between its children */
+.geCollapsibleTitle .geStyleRuleHint {
+	margin-left: 0;
+}
+
 .geCollapsibleTitle {
 	cursor: pointer;
 	-webkit-user-select: none;
@@ -1973,7 +2087,10 @@ a.geStatus>div {
 	margin: 0 8px 0 0;
 }
 
-.mxWindowPane .geSidebarContainer {
+/* Shapes in windows and in the shapes panel of the minimal theme without
+   windows (windows=0), with room for the library buttons */
+.mxWindowPane .geSidebarContainer,
+.geEditor>.geSidebarContainer .geSidebarContainer {
 	position: absolute;
 	width: 100% !important;
 	top: 0;
@@ -2038,6 +2155,33 @@ a.geStatus>div {
 	padding: 0px 0px 0px 16px;
 }
 
+/* Page groups (see EditorUi.createTabForPageGroup): the tab of a group and
+   the tabs of its pages are underlined, the current page is shown in a
+   collapsed group */
+.gePageTabGrouped,
+.gePageGroupTab {
+	box-shadow: inset 0 -2px 0 light-dark(var(--strong-border-color), var(--dark-strong-border-color));
+}
+
+.gePageTab.gePageTabCollapsed {
+	display: none;
+}
+
+.gePageGroupTab {
+	vertical-align: top;
+	margin-left: 4px;
+	padding: 0px 2px 0px 4px;
+	font-weight: 500;
+}
+
+.gePageGroupTab>div.geButton {
+	width: 20px !important;
+}
+
+.gePageGroupTab:not(:hover, :focus-within)>div.geButton:last-child {
+	opacity: 0;
+}
+
 .geControlTab {
 	width: 30px;
 	margin: 0 4px;
@@ -2097,7 +2241,7 @@ a.geStatus>div {
 	border-radius: 10px;
 	text-align: center;
 	font-size: 12px;
-	opacity: 0.6;
+	color: light-dark(#5f5f63, #a0a0a0);
 	padding: 6px;
 	margin: 4px 6px 4px 0;
 }
@@ -2111,7 +2255,7 @@ a.geStatus>div {
 .geLibraryButton {
 	position: relative;
 	border-radius: 50%;
-	padding: 2px;
+	padding: 5px;
 	width: 14px;
 	cursor: pointer;
 	margin: 0px 1px;
@@ -2120,6 +2264,12 @@ a.geStatus>div {
 
 .geLibraryButton:hover {
 	background-color: var(--active-color);
+}
+
+/* Keyboard focus ring of the buttons in the titles of libraries */
+.geLibraryButton:focus-visible {
+	outline: 2px solid light-dark(var(--focus-color), var(--dark-focus-color));
+	opacity: 1;
 }
 
 .geTitle .geButton {
@@ -2298,11 +2448,23 @@ a.geStatus>div {
 	padding-top: 4px;
 }
 
+/* Marks a required field of a dialog that is still empty or invalid, like
+   the style key of a step in the action dialog (.geAnimationFieldWarn) */
+.geDialog .geDialogFieldWarn {
+	border-color: light-dark(#e6a700, #ffcc4d) !important;
+	box-shadow: 0 0 0 1px light-dark(rgba(230, 167, 0, 0.25), rgba(255, 204, 77, 0.25));
+}
+
 /* Explanatory hint text describing what an option does - never for the
    current value of an entry, which stays in the regular text style */
 .geDialogHint {
 	font-size: 12px;
-	color: light-dark(var(--secondary-text-color), var(--dark-secondary-text-color));
+}
+
+/* Gray text in dialogs with at least 4.5:1 on their background (the secondary
+   text color has 4.45:1 on the light dialog color and gray 3.5:1) */
+.geDialogHint, .geSecondaryText {
+	color: light-dark(#5f5f63, var(--dark-secondary-text-color));
 }
 
 /* Home screen (HomeDialog): the Google Drive diagrams draw.io can open */
@@ -2411,10 +2573,12 @@ a.geStatus>div {
 	font-weight: 600;
 }
 
+/* Same ring as buttons (see .geBtn:focus-visible), in the room for the rings
+   of the nav and main parts */
 .geHome .geHomeNavItem:focus-visible,
 .geHome .geHomeCard:focus-visible {
-	outline: 1px solid transparent;
-	box-shadow: 0 0 0 3px light-dark(color-mix(in srgb, var(--focus-color) 35%, transparent), color-mix(in srgb, var(--dark-focus-color) 35%, transparent));
+	outline: 2px solid light-dark(var(--focus-color), var(--dark-focus-color));
+	outline-offset: 1px;
 }
 
 .geHome .geHomeNavSeparator {
@@ -2750,7 +2914,7 @@ a.geStatus>div {
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
-	color: light-dark(var(--secondary-text-color), var(--dark-secondary-text-color));
+	color: light-dark(#5f5f63, var(--dark-secondary-text-color));
 	background-color: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.04));
 	padding: 8px 12px 8px 16px;
 	border-bottom: 1px solid light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.06));
@@ -2926,6 +3090,151 @@ html div.mxRubberband {
 	padding: 6px 20px 6px 10px
 }
 
+/* Status messages for screen readers that are not shown (see EditorUi.announce) */
+.geLiveRegion {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* Cells of the page as a tree (see TextOutlineWindow), with the colors of
+   the layers and page tabs. The window collapses the groups itself. */
+.geTextOutline {
+	position: absolute;
+	inset: 0;
+	overflow: auto;
+	padding: 6px 0;
+	box-sizing: border-box;
+	font-size: 12px;
+	line-height: 16px;
+	user-select: none;
+	color: light-dark(var(--strong-text-color), var(--dark-strong-text-color));
+}
+
+.geTextOutline ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.geTextOutline li {
+	outline: none;
+}
+
+.geTextOutlineItem {
+	display: flex;
+	align-items: center;
+	height: 26px;
+	margin: 0 6px;
+	padding-right: 8px;
+	border-radius: 6px;
+	white-space: nowrap;
+	cursor: default;
+}
+
+.geTextOutlineItem:hover {
+	background-color: light-dark(var(--highlight-color), var(--dark-border-color));
+}
+
+.geTextOutline li[aria-selected="true"] > .geTextOutlineItem {
+	background-color: light-dark(var(--accent-color), var(--dark-accent-color));
+	color: light-dark(var(--accent-text-color), var(--dark-accent-text-color));
+}
+
+.geTextOutline li[aria-selected="true"] > .geTextOutlineItem:hover {
+	background-color: light-dark(var(--accent-hover-color), var(--dark-active-accent-color));
+}
+
+.geTextOutline li:focus-visible > .geTextOutlineItem {
+	outline: 2px solid light-dark(var(--focus-color), var(--dark-focus-color));
+	outline-offset: -2px;
+}
+
+.geTextOutlineToggle {
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	margin-right: 2px;
+	border-radius: 4px;
+}
+
+.geTextOutlineToggle img {
+	width: 16px;
+	height: 16px;
+	opacity: 0.55;
+	cursor: pointer;
+	transition: transform 0.15s ease;
+}
+
+.geTextOutlineToggle:hover img {
+	opacity: 1;
+}
+
+.geTextOutline li[aria-expanded="false"] > .geTextOutlineItem .geTextOutlineToggle img {
+	transform: rotate(-90deg);
+}
+
+.geTextOutlineName {
+	flex: 0 1 auto;
+	min-width: 24px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.geTextOutlineLayer > .geTextOutlineItem .geTextOutlineName {
+	font-weight: 600;
+}
+
+/* Shrinks before the name */
+.geTextOutlineKind {
+	flex: 0 1000 auto;
+	min-width: 0;
+	margin-left: 8px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 11px;
+}
+
+.geTextOutlineArrow {
+	flex: none;
+	margin-right: 5px;
+}
+
+.geTextOutlineKind,
+.geTextOutlineArrow,
+.geTextOutlineEmpty {
+	color: light-dark(var(--secondary-text-color), var(--dark-secondary-text-color));
+}
+
+.geTextOutline li[aria-selected="true"] > .geTextOutlineItem .geTextOutlineKind,
+.geTextOutline li[aria-selected="true"] > .geTextOutlineItem .geTextOutlineArrow {
+	color: inherit;
+	opacity: 0.75;
+}
+
+.geTextOutline > .geBtn {
+	display: block;
+	margin: 8px auto;
+}
+
+.geTextOutlineEmpty {
+	padding: 24px 12px;
+	text-align: center;
+}
+
+/* Same ring as the search of the Home dialog, the outline shows in forced colors */
+.geSearchSidebar input:focus {
+	outline: 1px solid transparent;
+	border-color: light-dark(var(--focus-color), var(--dark-focus-color));
+	box-shadow: 0 0 0 3px light-dark(color-mix(in srgb, var(--focus-color) 35%, transparent), color-mix(in srgb, var(--dark-focus-color) 35%, transparent));
+}
+
 .geSearchSidebar>div {
 	margin-bottom: 4px;
 }
@@ -3013,6 +3322,17 @@ table.geProperties tr th {
 .gePropHeader {
 	background-color: light-dark(#e5e5e5, #1a1a1a);
 	color: black;
+}
+
+/* The second cell has no fold arrow, so its text needs no filter, which
+   the contrast checks of assistive tools cannot see (white like the first) */
+.geDarkMode .gePropHeader>.gePropHeaderCell:nth-child(2) {
+	color: #ffffff;
+}
+
+/* Shortcuts in menus with enough contrast on the menu and its highlight */
+.geMenuShortcut {
+	color: light-dark(#5f5f63, #a0a0a0);
 }
 
 .gePropRowCell {

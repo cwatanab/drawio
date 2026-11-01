@@ -10,6 +10,9 @@ var GOOGLE_SHEET_MAX_AREA = 1000000; // The maximum number of pixels is 1 millio
 // Maximum number of pages in the print output so that extreme cell
 // coordinates cannot block the renderer with an excessive number of pages
 var MAX_PRINT_PAGE_COUNT = 1000;
+// Time in ms that the export waits for the traces of the outlines of images
+// (see Graph.waitForOutlines)
+var OUTLINE_TIMEOUT = 10000;
 var shadowBlocker = null;
 
 /**
@@ -159,6 +162,65 @@ function exportUsesMath(xml)
 	}
 };
 
+/**
+ * Returns the model nodes of the pages of the given mxfile or model node (see
+ * Editor.extractGraphModel) that have shapes with perimeter=outlinePerimeter
+ * (see Graph.isOutlinePerimeter), or null.
+ */
+function getOutlinePages(node)
+{
+	var pages = [];
+
+	try
+	{
+		var models = [node];
+
+		if (node.nodeName == 'mxfile')
+		{
+			var diagrams = node.getElementsByTagName('diagram');
+			models = [];
+
+			for (var i = 0; i < diagrams.length; i++)
+			{
+				models.push(Editor.parseDiagramNode(diagrams[i]));
+			}
+		}
+
+		for (var i = 0; i < models.length; i++)
+		{
+			var cells = (models[i] != null) ? models[i].getElementsByTagName('mxCell') : [];
+
+			for (var j = 0; j < cells.length; j++)
+			{
+				if (/(^|;)\s*perimeter=outlinePerimeter\s*(;|$)/.test(cells[j].getAttribute('style') || ''))
+				{
+					pages.push(models[i]);
+					break;
+				}
+			}
+		}
+	}
+	catch (e)
+	{
+		// Renders without waiting for outlines
+	}
+
+	return (pages.length > 0) ? pages : null;
+};
+
+/**
+ * Returns the given XML of a converted Mermaid diagram as a file whose page
+ * has the text alternative of the diagram as its Alt Text (see
+ * EditorUi.createMermaidPageXml), which the SVG export writes as its title.
+ * Checks the function as this file can be newer than app.min.js after a
+ * release.
+ */
+function getMermaidPageXml(editorUi, xml)
+{
+	return (typeof editorUi.createMermaidPageXml === 'function') ?
+		editorUi.createMermaidPageXml(xml) : xml;
+};
+
 function render(data)
 {
 	// Fixed-theme exports resolve adaptive light-dark() colors to the
@@ -276,7 +338,7 @@ function render(data)
 
 			editorUi.parseMermaidDiagram(data.mermaid, null, function(xml)
 			{
-				data.xml = xml;
+				data.xml = getMermaidPageXml(editorUi, xml);
 				delete data.mermaid;
 				render(data);
 			}, function(e)
@@ -331,7 +393,7 @@ function render(data)
 			{
 				editorUi.parseMermaidDiagram(data.mermaid, null, function(xml)
 				{
-					data.xml = xml;
+					data.xml = getMermaidPageXml(editorUi, xml);
 					delete data.mermaid;
 					render(data);
 				}, function(e)
@@ -896,6 +958,51 @@ function render(data)
 		return;
 	}
 
+	// Shapes with perimeter=outlinePerimeter end edges on the outline of what
+	// they paint, and the images of the outlines are traced asynchronously (see
+	// Graph.getImageOutline). Renders the pages once to start the traces and
+	// re-enters render() when they are done, so that the edges on all pages
+	// end on the outlines.
+	var outlinePages = (!data.outlinesTraced && typeof graph.waitForOutlines === 'function') ?
+		getOutlinePages(node) : null;
+
+	if (outlinePages != null)
+	{
+		data.outlinesTraced = true;
+
+		for (var i = 0; i < outlinePages.length; i++)
+		{
+			new mxCodec(outlinePages[i].ownerDocument).decode(outlinePages[i], graph.getModel());
+		}
+
+		if (graph.hasPendingOutlines())
+		{
+			// data.xml is the extracted XML and data.scale a number by now (see
+			// the PNG/PDF extraction and autoScale above)
+			if (extras != null && (extras.isPng || extras.isPdf))
+			{
+				extras.isPng = false;
+				extras.isPdf = false;
+				data.extras = JSON.stringify(extras);
+			}
+
+			if (autoScale)
+			{
+				data.scale = 'auto';
+			}
+
+			graph.waitForOutlines(function()
+			{
+				graph.destroy();
+				render(data);
+			}, OUTLINE_TIMEOUT);
+
+			return graph;
+		}
+
+		graph.getModel().clear();
+	}
+
 	// Handles mxfile
 	if (xmlDoc.documentElement.nodeName == 'mxfile')
 	{
@@ -969,7 +1076,85 @@ function render(data)
 	var math = false;
 	// True if any rendered page enables math
 	var mathUsed = false;
-	
+	// SVGs of the pages in SVG exports of all pages
+	var svgPages = null;
+
+	// Returns the SVG of the page in the graph (see EditorUi.exportSvg)
+	function getSvg()
+	{
+		// An explicit --transparent (data.bg == 'none') forces a transparent
+		// background; otherwise the page background is read from the diagram XML
+		// (graph.background is not populated in this headless renderer, as the
+		// model is decoded directly without setGraphXml) [jgraph/drawio-desktop#2469]
+		var bg = (data.bg == mxConstants.NONE) ? null :
+			xmlDoc.documentElement.getAttribute('background');
+
+		if (bg == mxConstants.NONE || bg == '')
+		{
+			bg = null;
+		}
+
+		var theme = 'auto';
+
+		if (data.theme != null)
+		{
+			theme = data.theme;
+		}
+
+		var linkTarget = null;
+
+		if (data.linkTarget == 'same-win')
+		{
+			linkTarget = '_top';
+		}
+		else if (data.linkTarget == 'new-win')
+		{
+			linkTarget = '_blank';
+		}
+
+		// Page-size export uses the page rectangle as the crop
+		// (see imagePageVisible in renderPage, which installs the
+		// getBackgroundPageBounds override that getSvg uses)
+		// Cell Metadata in the export dialog: adds the properties of
+		// the cells as data-meta-* attributes (see createSvgImageExport)
+		var imgExport = (data.embedCellMetadata == '1') ?
+			graph.createSvgImageExport(true) : null;
+
+		// getSvg adds the gradient of the page background only for
+		// the background color of the page (see
+		// Graph.getBackgroundGradient), which is not set here
+		var graphBackground = graph.background;
+		var svgRoot = null;
+		graph.background = bg;
+
+		try
+		{
+			svgRoot = graph.getSvg(bg, expScale, data.border, false, null,
+				true, null, imgExport, linkTarget, null, null, theme,
+				(data.exportType == 'page') ? 'page' : null);
+		}
+		finally
+		{
+			graph.background = graphBackground;
+		}
+
+		// Uses the attribute as the graph keeps the shadow of previous pages
+		if (xmlDoc.documentElement.getAttribute('shadow') == '1')
+		{
+			graph.addSvgShadow(svgRoot);
+		}
+
+		// Text alternative of the page (see DiagramPage.getAlt). Checks the
+		// function as this file can be newer than app.min.js after a release.
+		if (diagrams != null && diagrams[from] != null &&
+			typeof Graph.addSvgTitle === 'function')
+		{
+			Graph.addSvgTitle(svgRoot, diagrams[from].getAttribute('alt'));
+		}
+
+		return svgRoot;
+	};
+
 	// Decrements waitCounter and invokes callback when finished
 	function decrementWaitCounter()
 	{
@@ -1006,73 +1191,14 @@ function render(data)
 						electron.registerMsgListener('get-svg-data', (arg) => 
 						{
 							graph.mathEnabled = math; //Enable math such that getSvg works as expected
-							// Returns the exported SVG for the given graph (see EditorUi.exportSvg).
-							// An explicit --transparent (data.bg == 'none') forces a transparent
-							// background; otherwise the page background is read from the diagram XML
-							// (graph.background is not populated in this headless renderer, as the
-							// model is decoded directly without setGraphXml) [jgraph/drawio-desktop#2469]
-							var bg = (data.bg == mxConstants.NONE) ? null :
-								xmlDoc.documentElement.getAttribute('background');
+							var svgRoot = (svgPages != null) ?
+								Graph.createSvgWithViews(svgPages, 0) : getSvg();
 
-							if (bg == mxConstants.NONE || bg == '')
-							{
-								bg = null;
-							}
-
-							var theme = 'auto';
-
-							if (data.theme != null)
-							{
-								theme = data.theme;
-							}
-							
-							var linkTarget = null;
-
-							if (data.linkTarget == 'same-win')
-							{
-								linkTarget = '_top';
-							}
-							else if (data.linkTarget == 'new-win')
-							{
-								linkTarget = '_blank';
-							}
-
-							// Page-size export uses the page rectangle as the crop
-							// (see imagePageVisible in renderPage, which installs the
-							// getBackgroundPageBounds override that getSvg uses)
-							// Cell Metadata in the export dialog: adds the properties of
-							// the cells as data-meta-* attributes (see createSvgImageExport)
-							var imgExport = (data.embedCellMetadata == '1') ?
-								graph.createSvgImageExport(true) : null;
-
-							// getSvg adds the gradient of the page background only for
-							// the background color of the page (see
-							// Graph.getBackgroundGradient), which is not set here
-							var graphBackground = graph.background;
-							var svgRoot = null;
-							graph.background = bg;
-
-							try
-							{
-								svgRoot = graph.getSvg(bg, expScale, data.border, false, null,
-									true, null, imgExport, linkTarget, null, null, theme,
-									(data.exportType == 'page') ? 'page' : null);
-							}
-							finally
-							{
-								graph.background = graphBackground;
-							}
-							
-							if (graph.shadowVisible)
-							{
-								graph.addSvgShadow(svgRoot);
-							}
-							
 							// TODO addFontCss cannot be used as it requires this
 							// Adds CSS
 							//Editor.prototype.addFontCss(svgRoot);
-							
-							if (math)
+
+							if (mathUsed)
 							{
 								Editor.prototype.addMathCss(svgRoot);
 							}
@@ -2065,29 +2191,118 @@ function render(data)
 		};
 
 		waitCounter += to - from + 1;
-		
-		for (var i = from; i <= to; i++) 
-		{
-			if (diagrams[i] != null)
-			{
-				if (pageId == null)
-				{
-					pageId = diagrams[i].getAttribute('id');
-				}
-				
-				xmlDoc = Editor.parseDiagramNode(diagrams[i]);
-				
-				if (xmlDoc != null)
-				{
-					xmlDoc = xmlDoc.ownerDocument;
-				}
 
-				graph.getModel().clear();
-				from = i;
-				renderPage(diagrams[i].getAttribute('id'));
+		// Exports all pages into one SVG with a view for each page. Checks the
+		// function as this file can be newer than app.min.js after a release.
+		if (data.format == 'svg' && data.allPages == '1' &&
+			typeof Graph.createSvgWithViews === 'function')
+		{
+			svgPages = [];
+		}
+
+		// Renders the page with the given index into the graph
+		var renderDiagram = function(i)
+		{
+			if (pageId == null)
+			{
+				pageId = diagrams[i].getAttribute('id');
 			}
 
-			decrementWaitCounter();
+			xmlDoc = Editor.parseDiagramNode(diagrams[i]);
+
+			if (xmlDoc != null)
+			{
+				xmlDoc = xmlDoc.ownerDocument;
+			}
+
+			graph.getModel().clear();
+			from = i;
+			renderPage(diagrams[i].getAttribute('id'));
+		};
+
+		// Takes the SVG of each page once the outlines of its images are traced,
+		// one page after the other. getSvg typesets the labels of a page with
+		// math, which decrements the wait counter (see Editor.onMathJaxDone).
+		// The pages share one deadline for the traces, as the next page waits
+		// again for a trace that the timeout of the previous page stopped.
+		var outlineDeadline = Date.now() + OUTLINE_TIMEOUT;
+
+		// Renders the page with the given index and returns true if its SVG is
+		// taken later, when its outlines are traced, and the next pages are
+		// rendered after that (see renderSvgPages)
+		var renderSvgPage = function(i)
+		{
+			var pending = true;
+			var later = false;
+
+			var next = function()
+			{
+				pending = false;
+
+				if (diagrams[i] != null)
+				{
+					if (graph.mathEnabled)
+					{
+						waitCounter++;
+					}
+
+					svgPages.push({svg: getSvg(), id: diagrams[i].getAttribute('id'),
+						name: diagrams[i].getAttribute('name')});
+				}
+
+				decrementWaitCounter();
+
+				if (later)
+				{
+					renderSvgPages(i + 1);
+				}
+			};
+
+			if (diagrams[i] != null)
+			{
+				renderDiagram(i);
+			}
+
+			if (typeof graph.waitForOutlines === 'function')
+			{
+				graph.waitForOutlines(next, Math.max(0, outlineDeadline - Date.now()));
+			}
+			else
+			{
+				next();
+			}
+
+			later = pending;
+
+			return later;
+		};
+
+		// Renders the pages from the given index in a loop while their SVGs are
+		// taken at once, as a call from next would nest once for each page and
+		// overflow the stack for thousands of pages
+		var renderSvgPages = function(i)
+		{
+			while (i <= to && !renderSvgPage(i))
+			{
+				i++;
+			}
+		};
+
+		if (svgPages != null)
+		{
+			renderSvgPages(from);
+		}
+		else
+		{
+			for (var i = from; i <= to; i++)
+			{
+				if (diagrams[i] != null)
+				{
+					renderDiagram(i);
+				}
+
+				decrementWaitCounter();
+			}
 		}
 	}
 	else
@@ -2135,7 +2350,15 @@ function render(data)
 	{
 		renderMath(document.body);
 	}
-	
+
+	// Waits for the outlines of images that the first pass did not trace
+	// (see getOutlinePages), eg. of images that depend on the theme
+	if (typeof graph.waitForOutlines === 'function')
+	{
+		waitCounter++;
+		graph.waitForOutlines(decrementWaitCounter, OUTLINE_TIMEOUT);
+	}
+
 	// Invokes callback
 	decrementWaitCounter();
 	

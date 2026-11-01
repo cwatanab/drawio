@@ -1,3 +1,504 @@
+29-OCT-2026: 32.6.9
+
+- Adds connection point resize cases for the palette shapes of #783 and #916
+- Makes the storage and start dialogs of the web app usable with the keyboard
+- Raises the contrast of gray text in the storage and start dialogs and of dialog hints
+- Makes the templates of the New Diagram dialog keyboard accessible
+- Makes the file lists of the GitHub, GitLab and Trello dialogs keyboard accessible
+- Stops flow animations if the operating system asks for reduced motion
+- Makes the storage buttons of the create dialog keyboard accessible
+- Names the progress bars of spinners and disables storage buttons while they load
+- Names the file name, storage logo and file type of the New Diagram dialog
+- Makes the title buttons of windows 24px targets
+- Makes the toolbar of the lightbox keyboard accessible
+- Makes the buttons of the viewer toolbar keyboard accessible
+- Takes disabled buttons of the viewer toolbar out of the Tab order
+- Keeps the focus in the file lists of the GitHub, GitLab and Trello dialogs
+- Keeps the size of help icons in the titles of windows
+- Makes the tabs of the Configuration dialog keyboard accessible
+- Logs errors of error dialogs with their stack to the console
+- Revert "Logs errors of error dialogs with their stack to the console"
+- Adds resizeCentered style that keeps the center of shapes in all resizes
+- Inverts resizeCentered with Ctrl or Cmd while a resize handle is dragged
+- Keeps the center of relative geometries with resizeCentered and fires cellsArranged for Ctrl+cursor key resizes
+- Limits the regular expressions of editableCssRules
+- Stops the updates of a descriptor when another file is opened
+- Charges the alternatives of editableCssRules by their number
+- Removes the update listener of a descriptor after the event
+- Keeps at most 100,000 results in the placeholder cache
+- Keeps placeholder results only for keys that are looked up again
+- Shows the lightbox and viewer toolbars for Tab from the text outline button
+- Adds the Restore from a Zip key of the Confluence Cloud page ID mappings
+- Keeps the connection points of the U-turn arrow and UML 2.5 actions finite for extreme arrowhead lengths and arc sizes
+
+29-OCT-2026: 32.6.8
+
+- Updates the mathjax tooling and the CI wrangler pin for the Dependabot alerts
+- Runs the source checks on pushes and PRs to dev-db
+- Walks the descendants of nested invalid cells once in incremental validations
+- Keeps connectors visible that are connected to a shape a collaborator deletes at the same time
+- Walks the nested invalid cells if a walk stopped at a removed state
+- Keeps the open end of a connector at its point when the old parent of the removed terminal is unknown
+- Passes changed tie layouts on without routing the connectors per tie
+- Does not parse the styles of hidden ties for their connectors
+- Redraws traced outlines at most for a fifth of the time and not for failed traces
+- Traces the images of hidden documents in slices with messages
+- Shows the icons of page group tabs with the rules of one stylesheet
+- Keeps outlines at 256 points on large vertices
+- Measures all label gaps before their clip paths are written
+- Orders the nodes of invalid cells after cells without shapes in linear time
+- Inserts loops into the edges of their terminal without a lookup
+- Adds perf budget tests for crafted diagrams and runs them on every push
+- Delays only redraws of traced outlines and reports apps that fail to open
+- Shows the views of an SVG of all pages without general sibling selectors
+- Measures the texts of plain text labels with a background after painting all labels
+- Sets the ties of each connector once when ties are cloned with Ctrl+drag
+- Parses the ties of each connector once when ties are removed
+- Looks up the ties of connectors once per preview of cloned ties
+- Collects the hidden cells of collapsed tree topics without searching or recursion
+- Updates the tabs and placeholders once per edit when pages are moved
+- Passes on lane changes of ties that were laid out lazily after a zoom
+- Tests edges with line jumps only against the processed edges near them
+- Fails the traces of images that a wait timed out for in all graphs
+- Walks each cell once for the invalidations of all changes of an edit
+- Finds the segment of each label of an edge with a binary search
+- Keeps the ancestors with the data of placeholders while the view is validated
+- Adds perf budget families for the pre-existing on-open quadratics
+- Measures the plain text labels that are placed again at once after the last repaint
+- Keeps the line jumps of dense diagrams below the work limit of a validation
+- Skips a cell in an invalidation only if one earlier walk covers its flags
+- Tests all processed edges when the buckets of the line jump index hold more
+- Checks the steps of org chart boundaries once per merge
+- Limits crafted ELK options before they reach ELK
+- Pushes the cells of the changes into one array in the layout manager
+- Limits the automatic ELK runs of large layout containers
+- Looks up the selected cells in constant time and removes many in one pass
+- Adds differential tests of the selection model against the old implementation
+- Writes the rows of a data source in its dialog without the layout limits
+- Checks the selection lookup in isSelected also if nothing is selected
+- Runs the layouts of selected containers without the limits in one edit
+- Writes the tooltip of a cell once in SVG exports
+- Adds the translation keys of the Confluence Cloud page ID translation
+- Adds the missing translation keys of the draw.io Confluence Cloud app
+- Removes the listeners of many selection handlers in one pass
+- Adds deep-hierarchy tests of batches of removed listeners
+- Saves only the org chart waypoints that change the routes
+- Routes the connectors of org chart teams with more than 32 lines
+- Keeps Graph.isSameRoute and the points of bezier org chart connectors
+- Exports math pages with tooltip icons as SVG
+- Routes all connectors of an org chart manager with one walk
+- Updates the vendored drawio-plantuml bundle to commit 8769041
+- Filters the icon attributes of SVG exports after embedding images
+- Shows no scrollbars in resized viewers at 150 % display scaling
+- Redraws the outlines of images that load after the timeout of a wait
+- Keeps ELK margins and paddings with their numbers limited
+- Upgrades the routes of large tree boxes when libavoid is ready
+- Shows scrollbars for diagrams cut off by up to 0.83 px at 150 %
+- Keeps the size limits for the ancestors of small boxes in the libavoid re-run
+- Keeps late outlines of images that only temporary graphs waited for
+
+27-OCT-2026: 32.6.7
+
+- Pauses the autosaves for the closing saves of undo-stale
+- Makes drive-stale-etag deterministic under real timers
+- Holds the autosaves and the lazy cleanup for the cases of tree-undo
+- Redraws traced outlines in one walk and traces loaded images in slices
+- Traces all images of hidden documents at once, forces the redraw when a wait stops and visits labels of edges again
+- Runs the autosave stub of the real timers on the client window
+- Keeps the open end of a connector at its removed terminal in containers
+- Keeps the origin of the parent of cells that patches remove
+- Renames quoted url() references with balanced parentheses in SVG page IDs
+
+27-OCT-2026: 32.6.6
+
+- Trims the view IDs of page names with a scan and takes the SVGs of all pages in a loop
+- Compares a bounded number of library keys for each style and keeps the cached shape matches when the cache is full
+- Reads the old scripts of the page-groups and mermaid-alt tests from a release tag
+- Adds the lessons of the 32.6.5 release test to the release skill
+- Redraws only the port edges of traced outlines and finds old outlines without walking the cache
+- Counts the shared values of the closest keys exactly within a total budget and keeps shape matches in two generations
+- Compares a key with the values of the style when the key is longer
+- Gives the definitions of each page their own IDs in SVG exports of all pages
+- Keeps the images of all pages in one copy and the defs of Embed Images visible
+- Adds Spacing to the Properties panel of ties
+- Names the diagram of the viewer and the lightbox after the Alt Text of its page
+- Names the viewer after the shown page and after a new file of setXmlNode
+- Shows the current page after setXmlNode and names the page the viewer shows
+- Passes the navigation of the viewer to the parser on each update
+- Tests Spacing of several selected ties
+- Keeps the replays of the realtime undo repair per page
+- Adds the realtime scenario tree-undo for the hover arrows of Trees.js
+- Removes the terminal points of the connected ends of the Trees.js hover arrows
+- Keeps the popovers of the inline toolbar and the color window inside short inline editors
+- Replaces stale terminal points of cut ends and of Trees.js copies
+- Keeps the scroll position of popovers after changes and scrolls palettes with the popover
+- Keeps the shape picker of a click on a hover arrow open
+- Keeps the renaming of SVG page IDs linear for crafted url() values
+- Updates lockfiles for the open Dependabot alerts
+- Renames quoted url() references with a parenthesis in SVG page IDs again
+
+26-OCT-2026: 32.6.5
+
+- Keeps the label position of the new palette shape for changed alignments
+- Parses each label once when the text outline is filled
+- Finds the columns of selected table cells in linear time
+- Makes viewers and lightboxes figures with a text outline for screen readers
+- Hides the Text Outline button with Escape and keeps the scroll position of the diagram
+- Adds trimCurve to end curves where the markers start [jgraph/drawio#5819]
+- Lets page tabs be dropped onto the name of a tab
+- Adds optional page groups to the page tabs [jgraph/drawio#5774]
+- Shows the edge of selected edge labels and label gaps in edge selections
+- Bounds the encodings of embedded images in cells of many sizes
+- Keeps label gaps when a color set of the Style tab is applied
+- Routes auto-routed edges in the resize preview of the multi-selection box [jgraph/drawio#3370]
+- Stops libavoid solves without connectors from leaking their shapes
+- Compares palette shapes with the values of named styles when their shape changes
+- Announces wrapped plain text labels as the shapes show them
+- Parses each label once when the outline of a viewer is filled
+- Keeps pages dropped after a collapsed page group visible
+- Gives each size of an embedded image the encoding it got before
+- Sends the Page Groups switch to collaborators and keeps it in their saves
+- Starts the Confluence Cloud viewer without collectExternalHosts
+- Explores from connectors without a geometry
+- Hides the shape picker if it was already removed from the page
+- Records the groups of the GAE error log pass of 2026-10-26
+- Keeps the sources of embedded images whose sizes were not tried by the end of the call
+- Keeps the visible state of the tool windows while no file is open [jgraph/drawio#5823]
+- Adds the outline perimeter: edges end on the outline of what shapes paint
+- Fixes the tool windows that are kept while no file is open [jgraph/drawio#5823]
+- Spreads the connection points of shapes with the outline perimeter along the outline
+- Keeps the side points of outline shapes off the grid and lets the points on callout tails follow the tail
+- Documents the bent ends of snapToPoint routes when the outline points change
+- Exports all pages as one SVG with a view for each page [jgraph/drawio#5821]
+- Discards the result of an SVG or PNG export after its timeout
+- Adds a text alternative to pages for the SVG export
+- Restores the colors of a fixed theme before the shadow of an SVG export
+- Applies the Alt Text of Page Setup only if it was changed in the dialog
+- Retries an SVG or PNG export with a timeout of 5 minutes
+- Saves the result of an export that finished after its timeout on Retry
+- Keeps the Alt Text of a collaborator during the grace period of realtime
+- Writes the Alt Text of a new SVG file from its own first page
+- Traces the outlines of images on other pages before an SVG of all pages
+- Takes the SVG of each page in the CLI after its outlines and keeps the wait counter
+- Restores the embed choice of Export as SVG after All Pages
+- Adds the Alt Text row of Page Setup from diagramly
+- Waits once for stalled outline traces in the CLI export of all SVG pages
+- Ignores the node modules of the SVG views tests
+- Uses the accessibility title and description of Mermaid diagrams as their text alternative
+- Updates the Mermaid bundle to jgraph/drawio-mermaid@2c429a1
+- Updates the Mermaid bundle to jgraph/drawio-mermaid@0231f39
+- Adds ties that bundle connectors (prototype)
+- Previews moved and cloned ties on their connectors
+- Deletes ties with the delete action
+- Aligns moved ties with guides
+- Adds a Tie mode to the freehand tool
+- Stops the Tie mode of the freehand tool after a tie is added
+- Draws ties with the stroke of the tie
+- Updates tie layouts that were laid out for another zoom or pan
+- Adds the translations of Bundle, Unbundle and Tie
+- Fixes the findings of the performance and bug review of ties
+- Adds Select All for ties to the freehand Tie mode
+- Keeps the Mermaid text alternative of copies, authors and layouts
+- Routes snapToPoint ends to the outline points of the edited style
+- Traces the outlines of SVG and HTML files before their PDF export
+- Resets the styles of the copied shape for the snap points of outline shapes
+- Fixes the review findings of ties
+- Shows Select All of the freehand Tie mode as an icon in the mode row
+- Fixes copies of ties with the containers of their connectors
+- Adds the internal guide for connector ties
+- Fixes the shapes of the Basic palette in the Shapes button of the inline toolbar
+- Hides the inline toolbar while a shape picker that was opened with a click is shown
+- Shows the shapes of the library of a shape in the shape picker
+- Keeps drawing in the Tie mode of the freehand window after a tie is added
+- Fixes the review findings of the shape picker
+- Adds the balloon tree and mindmap layouts and the outline of tree boxes
+- Fixes the hover arrows of the branches of mindmaps at some zoom levels
+- Adds a regression suite for connector ties
+- Ignores crafted layout configs and logs the errors of container layouts
+- Writes the tooltips of images and groups as titles in SVG exports
+- Keeps ties out of the child layouts of their containers
+- Ignores double-clicks in the Tie mode of the freehand window
+- Fixes the review findings of the connector ties suite
+- Writes the title of a group on its group also if a plugin draws into another
+- Keeps ties in their layout containers and lets the layouts skip them
+- Fixes the review findings of the outline of tree boxes
+- Lays out balloon trees and mindmaps around roots that can't be moved
+- Keeps the order of the roots of an outline with a root that can't be moved
+- Leaves ties in place in ELK layouts of the Arrange > Layout dialog
+- Keeps ties out of the lane commands of pools
+- Keeps the top left of an outline with a line on a new level
+- Moves and copies the hidden branch of collapsed topics in mindmap boxes
+- Keeps the terminals of edges that an undo removes with their terminal
+- Ignores hidden shapes in the top left of an outline
+- Keeps the edge of the old parent exact when adding a parent is undone
+- Moves only the hidden cells below collapsed cells in layout containers
+- Moves the release skill into etc/build so anyone can run a release
+- Makes the release scripts report only what they checked
+
+25-OCT-2026: 32.6.4
+
+- Reads long decimals in style rules and placeholders as numbers again
+- Updates stable to 32.6.1
+- Names the Edit Data dialog for screen readers
+- Moves the focus into dialogs opened from menus and shortcuts
+- Names the Insert buttons of the text panel for screen readers
+- Keeps the inline toolbar popover off the selected shapes and shows its color window in inline embeds
+- Stops service workers on development hosts from failing every install
+- Stops the clear page from framing the other domain and fixes its buttons on ac.draw.io
+- Announces the selection and describes the diagram for screen readers
+- Links the shapes of a data source again when its key column changes
+- Removes the links of the shapes of a deleted data source
+- Needs a new preview for a data source whose URL was changed
+- Changes no connector styles in org chart layout containers whose layout fails
+- Reports a refresh of a read-only page as an error of its data sources
+- Shows Read-only for OK in the dialog of a data source of a read-only page
+- Reports an error while a refresh writes the cells of data sources
+- Shows Refresh All in an open Page Setup when the first data source is added
+- Shows an error for a style rule that would be lost in the Style Rules dialog
+- Keeps the font colors of the document in VSDX exports in dark mode
+- Shows only the rules that a page uses in the Style Rules dialog
+- Limits the size, rows, columns and connections of data source files
+- Counts only the rules that the page uses for Add Rule in the Style Rules dialog
+- Counts the connections of data sources from attributes that the import sets
+- Adds a text outline of the page for screen readers and the keyboard
+- Adds Alt+Shift+D, Alt+Shift+U and Ctrl+{ / } to the keyboard shortcuts
+- Names custom shapes Shape for screen readers instead of reading their stencil
+- Announces a selection with the same description as the previous one
+- Removes the listener of Page Setup when it is closed
+- Updates the text outline when shapes are hidden or shown by tag
+- Shows the inline toolbar for shapes in the simple theme by default
+- Keeps the inline toolbar off handles after it is clamped to the viewport
+- Adds a table popover to the inline toolbar for shapes
+- Keeps the popover of the inline toolbar off the toolbar beside shapes
+- Does not count empty rows and columns of data sources for their limits
+- Shows the rule that the page uses for a cleared rule in Style Rules
+- Adds a More button with the options of a single cell to the inline toolbar
+- Adds a Shape button to the inline toolbar for basic shapes
+- Adds Copy Style and Paste Style to the More button of the inline toolbar
+- Updates stable channel to 32.6.3
+- Embeds the external images of Confluence Cloud diagrams on save at the size of their cells
+- Lowers the cap per diagram to 2 MB and embeds images again for cells made larger
+- Cuts the label gaps out of edges in PDF exports and printouts [jgraph/drawio#5820]
+- Tests that the Forge app saves at once when the editor closes, and documents the Forge mode of the embed images suite
+- Keeps the styles of each shape when several shapes change their shape
+- Adds Insert to the context menu of the diagram with the shape toolbar
+- Offers the basic shapes of the General palette in the Shape popover
+- Adds effects, Rotate with Edge and the label background to the inline toolbar
+- Does not load images again that the size limit made smaller, and keeps their source when the same image is set again
+- Remembers the width a grown cell asked for when the source gives no wider image
+- Turns off effects of named styles in the More popover of the inline toolbar
+- Counts the blocked image and font hosts of the Jira Cloud app by page
+- Serves generate/v3 on ac.draw.io, aj.draw.io and app.diagrams.net and calls it on the own origin there
+- Shows only the named columns in the preview of data sources
+- Finds shapes with a label perimeter in the libraries of the sidebar
+- Offers the shapes of the library of a shape in the Shape popover
+- Moves Use Connector Style of edge labels to the Text popover
+- Keeps the formatting of shapes changed to another shape of their palette
+- Keeps moved labels when shapes change to another shape of their palette
+
+24-OCT-2026: 32.6.3
+
+- Reads the numbers of style rules and placeholders in styles in linear time
+- Checks the columns that data sources wrote once for all placeholders of a label
+- Trims the lines of text copied from labels with text flow in linear time
+
+23-OCT-2026: 32.6.2
+
+- Removes centering on clicks and zooming on double clicks in presentation mode
+- Limits the table operations of the text toolbar to the label editor
+- Inserts images, HTML and text dropped on a label that is being edited into the label
+- Inserts exported PNG and SVG files pasted into a label that is being edited as images
+- Keeps the colors of the parts of shapes and stencils in VSDX exports (#910)
+- Keeps the labels and the text of shapes in VSDX exports
+- Keeps the alignment and the fonts of text in VSDX exports
+- Applies the inline toolbar options to the cells they fit and adds arrange options
+- Hides tooltips when a popover or dropdown of the inline toolbar opens
+- Keeps edges on the connection points of the Lean Mapping kanbans after a resize
+- Keeps edges on the connection points of the Bootstrap popover after a resize
+- Keeps edges on the connection points of the DFD shapes after a resize
+- Keeps edges on the connection points of the SysML states and actions after a resize
+- Keeps edges on the pins of the Electrical multiplexer after a resize
+- Keeps edges on the connection points of the Basic shapes after a resize
+- Keeps edges on the connection points of the Infographic shapes after a resize
+- Keeps edges on the connection points of the Arrows shapes after a resize
+- Adds rules per page and placeholders in styles
+- Adds a modifier argument to mxKeyHandler.bindKey and binds Alt shortcuts with it
+- Uses the built-in features in the plugins that copied them
+- Keeps edges on the connection points of the ArchiMate Service and Event after a resize
+- Removes the page reordering test plugin
+- Adds a dialog for the style rules of a page
+- Moves the focus between the parts of the editor with F6 and Shift+F6
+- Adds F6 and Shift+F6 to the keyboard shortcuts
+- Shows a focus ring on the diagram and on dialog buttons for keyboard focus
+- Gives dialogs a role and a name and returns the focus to their opener
+- Declares the language of the user interface on the page
+- Allows pinch zoom on the pages without the editor
+- Adds alt text to the images in embed snippets
+- Uses a random realtime channel key from the Nextcloud host
+- Shows in the Format panel which values style rules set
+- Adds Insert Legend to the Style Rules dialog
+- Adds data sources to pages that refresh the data of linked cells
+- Adds keyboard access and ARIA roles to menus
+- Returns the focus to the diagram with Escape
+- Moves Tab through the user interface in reading order
+- Removes F6
+- Moves the focus to the search for shapes with Slash from everywhere
+- Makes toolbar buttons focusable
+- Expands and collapses foldable headers with the keyboard
+- Anchors the connection points of label shapes drawn from the height to their nearest side
+- Gives the focus back to the diagram when it is shown
+- Adds tree shapes with Enter shortcuts and edits the new shape [jgraph/drawio#5817]
+- Moves the focus between the controls outside of the diagram with the arrow keys
+- Adds the Data Sources dialog and makes the data styles linear
+- Makes the update of labels and shapes with placeholders linear for nested edits
+- Inserts tables from the table picker with the keyboard
+- Moves the focus into windows opened with the keyboard and closes them with Escape
+- Escapes values from data sources in all labels that are shown as HTML
+- Shows the first paragraph of labels on one line as the title of the explorer
+- Allows one explore step at the end of an action and disables its levels in classic mode
+- Checks the options of dialogs if their fields are used, not if they get the focus
+- Zooms the label editor with the zoom preview
+- Moves the label gap with the label of an edge that is dragged
+- Starts the caret of empty labels in shapes with text flow where the text will be
+- Shows only the first line of labels in the title of the explorer and removes the levels
+- Adds the levels of the explorer earlier when zooming out
+- Ends the title of the explorer with an ellipsis if the label has more lines
+- Defines checkRadioOnInput in the grapheditor so the print dialog of the viewer opens
+- Keeps the explore step of an action and the selection when steps are added or pasted
+- Keeps the lines of labels with text flow and copies and pastes them without the helpers
+- Keeps the format of part of a word copied from labels with text flow
+- Keeps blank lines, lists, undo and formatting in labels with text flow
+- Saves empty lines of labels with text flow only when an edit emptied the label
+- Writes the label of shapes with text flow only if it was edited
+- Moves the focus with Shift+arrow keys from everywhere outside of the diagram
+- Makes the shapes and palette titles of the sidebar keyboard accessible
+- Makes Shift+Tab go back to where Tab came from
+- Makes windows without controls reachable with Tab and the arrow keys
+- Makes the Layers and Tags windows and the help icons keyboard accessible
+- Moves the focus with the arrow keys in dialogs and windows and makes their title buttons keyboard accessible
+- Makes the keyboard focus visible on toolbar buttons and the shape search
+- Announces status messages to screen readers
+- Generates shapes from data sources with CSV import directives
+- Moves the focus out of the diagram with Shift+arrow keys without a selection
+- Inserts shapes with Ctrl+Enter without a selection and shows the context menu with Shift+F10
+- Makes the empty selection the first stop of Tab in the diagram
+- Keeps the format window of the sketch theme open on Escape
+- Shows the current format when the format window of the minimal theme opens
+- Moves the focus to the format panel with Shift+Enter
+- Moves the focus into the diagram with Shift+arrow keys
+- Keeps Shift+Arrow Left and Right for selecting text in text fields
+- Refreshes the format panel before the edge label tests read the Reset list
+- Fixes the Catalan translations [jgraph/drawio#5818]
+- Makes inserts look only at the cells with the routing flag for auto-routed edges
+- Makes the empty selection also the stop of Tab after the last cell
+- Shows the keyboard focus of buttons as an outline, also in dark mode
+- Saves an edited label with text flow that was stored as an empty line as an empty label
+- Adds the colors for dark mode to pasted and dropped text in the label editor
+- Adds the colors for dark mode to HTML dropped into the label editor of the app
+- Makes the buttons in the titles of libraries keyboard accessible
+- Shows the keyboard focus in the Home dialog as an outline, also in dark mode
+- Inserts tables from the table picker of the text toolbar with the keyboard
+- Applies a zoom typed into the zoom field on Tab
+- Lets Tab and Shift+Tab leave an editor in a frame at the ends of the order
+- Keeps the arrow keys in fields with suggestions and in date fields
+- Continues Tab in the diagram after a shape is inserted from the sidebar
+- Moves the focus to the format panel with Shift+Enter before the format window exists
+- Cancels a value in the property grid with Escape
+- Returns the focus to the diagram after a context menu opened with the mouse
+- Moves the focus out of menus with Shift+Arrow Left and Right
+- Announces buttons disabled with the mxDisabled class as disabled
+- Leaves an editor in a frame with Tab only at the ends of the order
+- Fixes the minimal theme without windows (windows=0)
+- Leaves the arrow keys without Shift to areas that scroll
+- Draws the focus rings of buttons inside of the buttons
+- Makes the page tabs keyboard accessible
+- Makes the tabs and the other buttons of the format panel keyboard accessible
+- Makes the toolbar buttons, app icons, status actions and toolbar shapes keyboard accessible
+- Fixes the find windows missing in the list of windows
+- Adds the color window to the order of Tab and its colors to the keyboard
+- Makes the search reset buttons and the template categories keyboard accessible
+- Loads Google Sheets links as data sources and names hosts that cannot be reached
+- Makes the entries of the library dialog keyboard accessible
+- Moves to the preview and the buttons of the More Shapes dialog with Shift+Arrow Left and Right
+- Adds keyboard navigation to the Explore view
+- Makes the Style Rules dialog resizable with a bigger initial size
+- Applies the style rules of the page in the explorer
+- Moves Style Rules and Data Sources into Page Setup and adds its help link
+- Keeps the controls of page tabs, library titles, library entries and the color window apart for screen readers
+- Names the color scheme buttons in the format panel
+- Shows the focus ring of the diagram when Tab clears the selection after the last shape
+- Moves the focus to the shape search with Slash only from the diagram
+- Keeps the links in the labels of a read-only diagram in the order of Tab
+- Announces the label of the cell in the diagram for the highlighted node of the Explore view
+- Keeps the label of custom library titles as the control for the keyboard
+- Raises the contrast of gray text in menus, the shapes panel and the format panel
+- Makes the small buttons of library titles, the color window and the color schemes 24px targets
+- Names fields and images for screen readers
+- Documents names, images, target sizes and contrast in the dialog style guide
+- Lets data sources and style rules set https images
+- Clears the selection with Escape in the diagram if Escape has no other effect
+- Removes unused variables from the connection points of ArchiMate Event, Popover, Bar Callout and Circular Dial
+- Anchors the connection points of shapes drawn from one side to that side
+- Keeps the selection when Escape closes a popover of the inline toolbar or a note
+- Selects the nearest shape in a direction with Alt+arrow keys, or with Shift+arrow keys if configured
+- Ends a pending move of the selection before Alt or Shift+arrow keys select another shape
+- Selects connectors too with Alt or Shift+arrow keys
+- Moves between the search field of the help menu and its items with Up and Down
+- Keeps connectors on the same path from selecting each other with Alt or Shift+arrow keys
+- Updates drawio-elk bundle to 0.1.0+commit.ce35b42
+- Makes the org chart layout the layout of layout containers
+- Remembers the options of the Org Chart dialog and applies it to layout containers
+- Adds Last Layout to the Add list of the custom layout dialog
+- Adds Refresh All to the Data Sources row of Page Setup
+- Moves the focus to the nearest color with Shift+arrow keys in the color window and dialog
+- Asks whether a changed template applies to the generated shapes
+- Keeps Alt or Shift+arrow keys at the nesting level of the selection in tables and lists
+- Goes out of containers with Shift+Tab in the diagram
+- Stacks the buttons of the Data Sources row in Page Setup
+- Skips cells that cannot be selected with Tab and Shift+Tab in the diagram
+- Shows the guides when shapes are moved or resized with the arrow keys
+- Shows the refresh status of Page Setup below the description
+- Moves the shapes into the layout container of an applied template
+- Loads the org chart layout in Edit of a data source
+- Shows the edge guides of a resize with the arrow keys where the edges line up
+- Puts the labels of re-routed connectors in org chart containers in the middle
+- Always shows the option that applies the template to the generated shapes
+- Adds the Stacked Leaves type to the org chart layout
+- Leaves Space to buttons and other controls outside of the diagram
+- Closes the field of a property when Escape cancels the edit
+- Updates the connectors of existing shapes when a data source applies a changed template
+- Adds Edit Layout for layout containers
+- Keeps edges on the connection points of the core shapes after a resize
+- Counts the hosts the Connect app loads from that Zero Egress would block
+- Reports the hosts the Confluence Cloud Connect app loads from to the log worker
+- Gives the default instead of NaN points for non-numeric style fractions of the Arrows and Basic shapes
+- Reports no hosts in lockdown strings or without storage in the Connect app
+- Applies the changed style values of a data source template also where shapes were changed
+- Stores the template of the shapes and connectors of data sources
+- Adds Stack from Level to the org chart layout
+- Opens the shape picker with Ctrl+Enter only if the current layer is not locked
+- Hides the tooltip of the sidebar when the explorer opens
+- Asks for access to a Google Drive file in the lightbox of published links
+- Links only cells with a data source and a key
+- Fades the cells of missing rows only while their source fades them
+- Reports the restyled connections of data sources like an arrange action
+- Reads values with line breaks in data sources
+- Removes the changes of a generation of shapes that fails
+- Adds a report of what the Forge app loads from draw.io's hosts
+- Counts the government cloud and leaves the beacon out of /images in the Forge report
+- Keeps edges on the cut-off ends of the Display and Isometric Cube after a resize
+- Adds tests for the connection points of shapes after a resize
+- Updates the vendored drawio-plantuml bundle to commit b85b52c
+- Allows the Google Picker of Allow access in the viewer.diagrams.net CSP [jgraph/drawio-dev#922]
+- Fixes Find & Replace in HTML labels that show data source values with special characters [jgraph/drawio-dev#922]
+- Lays out only the shapes of new rows in data source refreshes with the org chart layout [jgraph/drawio-dev#922]
+- Keeps connections from existing shapes to new ones in CSV imports and data source refreshes with ELK layouts [jgraph/drawio-dev#922]
+- Moves the shapes of unknown references with the rest of org charts in CSV imports [jgraph/drawio-dev#922]
+- Lays out org charts whose managers are hidden [jgraph/drawio-dev#922]
+- Fixes Find & Replace of data source values with quotes in HTML labels [jgraph/drawio-dev#922]
+- Moves the existing connections of re-imported org charts with their shapes [jgraph/drawio-dev#922]
+- Keeps relative links as they are in SVG exports and printouts of the desktop app
+
 21-OCT-2026: 32.6.1
 
 - Adds Explore to the action dialog and a classic option to explore actions

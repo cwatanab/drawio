@@ -473,9 +473,17 @@ mxEdgeHandler.prototype.createParentHighlightShape = function(bounds)
 		null, this.getSelectionColor());
 	shape.strokewidth = this.getSelectionStrokeWidth();
 	shape.isDashed = this.isSelectionDashed();
-	
+
 	return shape;
 };
+
+/**
+ * Function: createEdgeParentHighlightShape
+ *
+ * Creates the shape used to highlight the given edge state if the parent
+ * of the cell is an edge.
+ */
+mxEdgeHandler.prototype.createEdgeParentHighlightShape = mxVertexHandler.prototype.createEdgeParentHighlightShape;
 
 /**
  * Function: createSelectionShape

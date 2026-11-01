@@ -37,6 +37,10 @@
 	// model order breaks crossing-minimization ties and never adds crossings.
 	Menus.flowModelOrder = 'NODES_AND_EDGES';
 
+	// Default style for edges seeded inside the layout containers below.
+	Menus.layoutContainerEdgeStyle = 'html=1;rounded=1;curved=0;' +
+		'sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startSize=6;endSize=6;';
+
 	Menus.layoutContainers = (function()
 	{
 		var elkChildLayout = function(layout, config)
@@ -67,10 +71,14 @@
 				'transparentBounds=1;groupPadding=20;' + extra;
 		};
 
-		var entry = function(sideTitle, width, height, extra)
+		// The optional vertex and edge styles are the styles of the seed cells
+		// (default is a box with wrapped text and the edge style of the caller)
+		var entry = function(sideTitle, width, height, extra, vertexStyle, edgeStyle)
 		{
 			return {width: width, height: height, style: group(extra),
-				sidebarStyle: swimlane(sideTitle, extra)};
+				sidebarStyle: swimlane(sideTitle, extra),
+				vertexStyle: (vertexStyle != null) ? vertexStyle : 'whiteSpace=wrap;html=1;',
+				edgeStyle: edgeStyle};
 		};
 
 		var topPad = '[top=40,left=20,bottom=20,right=20]';
@@ -114,13 +122,41 @@
 				elkChildLayout('elkRadial', {'elk.padding': topPad})),
 			organic: entry(false, 320, 320,
 				elkChildLayout('elkOrganic', {'elk.padding': topPad})),
-			circle: entry(false, 320, 320, 'childLayout=circleLayout;')
+			circle: entry(false, 320, 320, 'childLayout=circleLayout;'),
+			// Straight connectors without arrows. The shapes pass them on to
+			// the connectors of the tree tools (newEdgeStyle), which start
+			// with the current style for the children of a root.
+			balloonTree: entry(false, 645, 537, 'containerType=tree;childLayout=' +
+				Graph.encodeChildLayout([{layout: 'BalloonTreeLayout',
+					config: {levelDistance: 30, nodeDistance: 10, arc: 300, childArc: 90}}]) + ';',
+				'whiteSpace=wrap;html=1;newEdgeStyle=' + Graph.encodeNewEdgeStyle(
+					{edgeStyle: 'none', startArrow: 'none', endArrow: 'none'}) + ';',
+				Menus.layoutContainerEdgeStyle + 'startArrow=none;endArrow=none;'),
+			// The shapes of the mindmap in the Advanced sidebar (see Trees.js):
+			// an ellipse as the root, topics that fit their label and curved
+			// connectors
+			mindmap: (function()
+			{
+				var newEdgeStyle = 'newEdgeStyle=' + Graph.encodeNewEdgeStyle({
+					edgeStyle: 'entityRelationEdgeStyle', startArrow: 'none',
+					endArrow: 'none', segment: 10, curved: 1, sourcePerimeterSpacing: 0,
+					targetPerimeterSpacing: 0}) + ';';
+				var def = entry(false, 380, 116, 'containerType=tree;childLayout=' +
+					Graph.encodeChildLayout([{layout: 'MindmapLayout',
+						config: {levelDistance: 40, nodeDistance: 10}}]) + ';',
+					'whiteSpace=wrap;html=1;rounded=1;arcSize=50;align=center;' +
+					'verticalAlign=middle;strokeWidth=1;autosize=1;spacing=4;' +
+					'treeFolding=1;treeMoving=1;' + newEdgeStyle,
+					'edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;' +
+					'segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;');
+				def.vertexSize = [80, 20];
+				def.rootStyle = 'ellipse;whiteSpace=wrap;html=1;align=center;' +
+					'treeFolding=1;treeMoving=1;' + newEdgeStyle;
+
+				return def;
+			})()
 		};
 	})();
-
-	// Default style for edges seeded inside the layout containers above.
-	Menus.layoutContainerEdgeStyle = 'html=1;rounded=1;curved=0;' +
-		'sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startSize=6;endSize=6;';
 
 	Menus.prototype.createHelpLink = function(href)
 	{
@@ -308,6 +344,19 @@
 		{
 			return editorUi.pages != null && editorUi.pages.length > 1 &&
 				editorUi.editor.graph.isEnabled();
+		};
+
+		var pageGroupsAction = editorUi.actions.put('pageGroups', new Action(
+			mxResources.get('pageGroups', null, 'Page Groups'), function()
+		{
+			editorUi.setPageGroupsEnabled(!editorUi.isPageGroupsEnabled());
+		}));
+
+		pageGroupsAction.setToggleAction(true);
+		pageGroupsAction.setSelectedCallback(function() { return editorUi.isPageGroupsEnabled(); });
+		pageGroupsAction.isEnabled = function()
+		{
+			return editorUi.fileNode != null && editorUi.editor.graph.isEnabled();
 		};
 		
 		var shareCursorAction = editorUi.actions.addAction('shareCursor', function()
@@ -1131,17 +1180,29 @@
 				mxUtils.bind(this, function(scale, transparentBackground, ignoreSelection,
 					addShadow, editable, embedImages, border, cropImage, currentPage,
 					linkTarget, grid, theme, exportType, embedFonts, embedCellMetadata,
-					dpi, icons)
+					dpi, icons, allPages)
 				{
 					var val = parseInt(scale);
 					editorUi.lastExportSvgEditable = editable;
 
 					if (!isNaN(val) && val > 0)
 					{
-						editorUi.exportSvg(val / 100, transparentBackground, ignoreSelection,
-							addShadow, editable, embedImages, border, !cropImage, currentPage,
-							linkTarget, theme, exportType, embedFonts, null, embedCellMetadata,
-							grid, icons);
+						var exportSvg = function()
+						{
+							editorUi.exportSvg(val / 100, transparentBackground, ignoreSelection,
+								addShadow, editable, embedImages, border, !cropImage, currentPage,
+								linkTarget, theme, exportType, embedFonts, null, embedCellMetadata,
+								grid, icons, allPages);
+						};
+
+						if (allPages)
+						{
+							editorUi.prepareOtherPages(exportSvg);
+						}
+						else
+						{
+							exportSvg();
+						}
 					}
 				}), true, editorUi.lastExportSvgEditable, 'svg', true);
 		}));
@@ -1279,7 +1340,8 @@
 			// shortcuts.svg is shown in a dialog which also works offline
 			if (EditorUi.isElectronApp)
 			{
-				var ratio = 1069 / 1427;
+				// Height and width of shortcuts.svg
+				var ratio = 1165 / 1427;
 				var w = Math.max(200, Math.min(1427, window.innerWidth - 120));
 				var h = Math.round(w * ratio);
 				var maxH = Math.max(150, window.innerHeight - 120);
@@ -1322,6 +1384,64 @@
 			}
 		});
 		
+		editorUi.actions.addAction('styleRules...', function()
+		{
+			if (editorUi.editor.graph.isEnabled())
+			{
+				var dlg = new StyleRulesDialog(editorUi);
+				editorUi.showDialog(dlg.container, 760, 440, true, true, null, null, null,
+					new mxRectangle(0, 0, 560, 300), null, 'styleRules');
+				dlg.init();
+			}
+		});
+
+		editorUi.actions.addAction('dataSources...', function()
+		{
+			if (editorUi.editor.graph.isEnabled())
+			{
+				var dlg = new DataSourcesDialog(editorUi);
+				editorUi.showDialog(dlg.container, 560, null, true, true, function()
+				{
+					dlg.destroy();
+				});
+				dlg.init();
+			}
+		});
+
+		// Refresh All in the Data Sources row of Page Setup, which passes a
+		// function(text, error, busy) for the status of the refresh
+		var refreshDataSources = editorUi.actions.addAction('refreshDataSources', function(status)
+		{
+			if (editorUi.editor.graph.isEnabled())
+			{
+				status = (typeof status === 'function') ? status : function() { };
+				status(mxResources.get('loading') + '...', false, true);
+
+				editorUi.refreshDataSources(null, function(count, errors)
+				{
+					if (errors.length > 0)
+					{
+						status(errors.map(function(e)
+						{
+							return e.source.id + ': ' + ((e.error != null &&
+								e.error.message != null) ? e.error.message : e.error);
+						}).join('; '), true, false);
+					}
+					else
+					{
+						status(mxResources.get('refreshedAt',
+							[new Date().toLocaleTimeString()], 'Refreshed at {1}'), false, false);
+					}
+				});
+			}
+		});
+
+		// Only for pages with data sources
+		refreshDataSources.isVisible = function()
+		{
+			return editorUi.editor.graph.getDataSources().length > 0;
+		};
+
 		action = editorUi.actions.addAction('tags', mxUtils.bind(this, function()
 		{
 			if (this.tagsWindow == null)
@@ -1717,6 +1837,34 @@
 			}
 		}, null, null, Editor.ctrlKey + '+' + Editor.altKey + '+T');
 
+		// Opens the dialog of the layout of the selected layout container
+		editorUi.actions.addAction('editLayout...', function()
+		{
+			var cell = editorUi.getEditableLayoutContainer();
+
+			if (cell != null)
+			{
+				editorUi.editContainerLayout(cell);
+			}
+		});
+
+		// Opens the outline of the selected tree, balloon or mindmap container
+		editorUi.actions.addAction('editOutline...', function()
+		{
+			var cell = editorUi.getOutlineContainer();
+
+			if (cell != null)
+			{
+				editorUi.showOutlineDialog(cell);
+			}
+		});
+
+		// Inserts a tree, balloon or mindmap container from an outline
+		editorUi.actions.addAction('fromOutline...', function()
+		{
+			editorUi.showOutlineDialog();
+		}).isEnabled = isGraphEnabled;
+
 		// Adds action for removing user-defined colors
 		editorUi.actions.put('adaptiveColors', new Action('adaptiveColors', function(evt)
 		{
@@ -1757,7 +1905,7 @@
 			}, parent, null, isGraphEnabled() && editorUi.lastLayoutSpec != null);
 
 			menus.addShortcut(item, action);
-
+			menus.addMenuItems(menu, ['editLayout', 'editOutline'], parent);
 			menu.addSeparator(parent);
 
 			if (typeof ElkLayout !== 'undefined')
@@ -1785,132 +1933,13 @@
 				addElk('organic');
 			}
 
+			// Selected layout containers get the org chart as their layout
 			menu.addItem(mxResources.get('orgChart') + '...', null, function()
 			{
-				var branchOptimizer = null, parentChildSpacingVal = 20, siblingSpacingVal = 20;
-				
-				// Invoked when orgchart code was loaded
-				var delayed = function()
+				editorUi.showOrgChartConfigDialog(function(entry)
 				{
-					if (typeof mxOrgChartLayout !== 'undefined' && branchOptimizer != null)
-					{
-						editorUi.tryAndHandle(mxUtils.bind(this, function()
-						{
-							var graph = editorUi.editor.graph;
-							var orgChartLayout = new mxOrgChartLayout(graph,
-								branchOptimizer, parentChildSpacingVal, siblingSpacingVal);
-							var cell = graph.getDefaultParent();
-							
-							if (graph.model.getChildCount(graph.getSelectionCell()) > 1)
-							{
-								cell = graph.getSelectionCell();
-							}
-							
-							orgChartLayout.execute(cell);
-						}));
-					}
-				};
-
-				var div = document.createElement('div');
-
-				// Each label + control sits on its own block row with a bottom
-				// margin, so the rows keep a consistent vertical rhythm. The old
-				// inline-block flow gave the rows no inter-row spacing (the
-				// label marginTop only nudged vertical-align within a row), so
-				// the dropdown row sat cramped against the row below it.
-				var addRow = function(labelKey, control)
-				{
-					var row = document.createElement('div');
-					row.style.marginBottom = '8px';
-
-					var label = document.createElement('div');
-					label.style.display = 'inline-block';
-					label.style.width = '180px';
-					label.style.verticalAlign = 'middle';
-					mxUtils.write(label, mxResources.get(labelKey) + ': ');
-					row.appendChild(label);
-
-					control.style.width = '160px';
-					control.style.boxSizing = 'border-box';
-					control.style.verticalAlign = 'middle';
-					row.appendChild(control);
-
-					div.appendChild(row);
-				};
-
-				var typeSelect = document.createElement('select');
-
-				//Types are hardcoded here since the code is not loaded yet
-				var typesArr = [mxResources.get('linear'),
-					mxResources.get('hanger2'),
-					mxResources.get('hanger4'),
-					mxResources.get('fishbone1'),
-					mxResources.get('fishbone2'),
-					mxResources.get('1ColumnLeft'),
-					mxResources.get('1ColumnRight'),
-					mxResources.get('smart')
-				];
-
-				for (var i = 0; i < typesArr.length; i++)
-				{
-					var option = document.createElement('option');
-					mxUtils.write(option, typesArr[i]);
-					option.value = i;
-
-					if (i == 2)
-					{
-						option.setAttribute('selected', 'selected');
-					}
-
-					typeSelect.appendChild(option);
-				}
-
-				mxEvent.addListener(typeSelect, 'change', function()
-				{
-					branchOptimizer = typeSelect.value;
+					editorUi.runOrgChartLayout(entry);
 				});
-
-				addRow('orgChartType', typeSelect);
-
-				var parentChildSpacing = document.createElement('input');
-				parentChildSpacing.type = 'number';
-				parentChildSpacing.value = parentChildSpacingVal;
-
-				mxEvent.addListener(parentChildSpacing, 'change', function()
-				{
-					parentChildSpacingVal = parentChildSpacing.value;
-				});
-
-				addRow('parentChildSpacing', parentChildSpacing);
-
-				var siblingSpacing = document.createElement('input');
-				siblingSpacing.type = 'number';
-				siblingSpacing.value = siblingSpacingVal;
-
-				mxEvent.addListener(siblingSpacing, 'change', function()
-				{
-					siblingSpacingVal = siblingSpacing.value;
-				});
-
-				addRow('siblingSpacing', siblingSpacing);
-
-				// The legacy "Custom…" escape hatch is gone now that the Custom
-				// Layout dialog has its own Add dropdown — picking Org Chart
-				// there opens this same configuration UI and writes the JSON.
-				var dlg = new CustomDialog(editorUi, div, function()
-				{
-					if (branchOptimizer == null)
-					{
-						branchOptimizer = 2;
-					}
-
-					editorUi.loadOrgChartLayouts(delayed);
-				}, null, null,
-					'https://www.drawio.com/docs/manual/layouts/org-chart-layout/');
-
-				// null height = size to content (a fixed height clips the
-				// third row behind a scrollbar)
-				editorUi.showDialog(dlg.container, 355, null, true, true);
 			}, parent, null, isGraphEnabled());
 
 			// Circle layout has no ELK equivalent (radial is concentric rings,
@@ -1946,6 +1975,23 @@
 					}, true);
 				}));
 			}), parent);
+
+			// Selected layout containers get these layouts as their layout
+			menu.addSeparator(parent);
+
+			var addLayoutDialog = function(label, name)
+			{
+				menu.addItem(mxResources.get(label) + '...', null, function()
+				{
+					editorUi.showLayoutDialog(name, function(entry)
+					{
+						editorUi.runLayoutEntry(entry);
+					});
+				}, parent, null, isGraphEnabled());
+			};
+
+			addLayoutDialog('balloonTree', 'BalloonTreeLayout');
+			addLayoutDialog('mindmap', 'MindmapLayout');
 
 			menu.addSeparator(parent);
 
@@ -2024,6 +2070,7 @@
 				item.style.cursor = 'default';
 				
 				var input = document.createElement('input');
+				input.setAttribute('aria-label', mxResources.get('search'));
 				input.setAttribute('type', 'text');
 				input.setAttribute('size', '25');
 				input.style.borderWidth = '1px';
@@ -3078,7 +3125,8 @@
 						{
 							var dlg = new EmbedDialog(editorUi, '<img src="' + EditorUi.encodeAttributeUrl(
 								(current.constructor != DriveFile) ? url : 'https://drive.google.com/uc?id=' +
-								current.getId()) + '"/>');
+								current.getId()) + '" alt="' + mxUtils.htmlEntities(
+								editorUi.getEmbedImageAlt(true)) + '"/>');
 							editorUi.showDialog(dlg.container, 450, 270, true, true, null, false, null, new mxRectangle(0, 0, 400, 250));
 							dlg.init();
 						}
@@ -4121,8 +4169,6 @@
 			graph.view.addListener(mxEvent.TRANSLATE, stopScroll);
 			graph.view.addListener(mxEvent.SCALE_AND_TRANSLATE, stopScroll);
 
-			// Moves the cell to the center, zooming a little if needed, and makes
-			// it glow
 			// Limits the scroll position so that the diagram stays near the window:
 			// next to a larger diagram at most a quarter of the window is empty and
 			// a smaller diagram stays in the window
@@ -4289,41 +4335,8 @@
 				return result;
 			};
 
-			// Duration of the zoom transitions of the buttons and double clicks
+			// Duration of the zoom transitions of the buttons
 			var zoomDuration = (ForceExplorer.isReducedMotion()) ? 0 : 300;
-
-			// The view before a double click zoomed into a cell, which the next
-			// double click restores. Other changes of the scale and the page
-			// clear it.
-			var focusView = null;
-			var internalZoom = false;
-
-			graph.view.addListener(mxEvent.SCALE, function()
-			{
-				if (!internalZoom)
-				{
-					focusView = null;
-				}
-			});
-
-			graph.view.addListener(mxEvent.SCALE_AND_TRANSLATE, function()
-			{
-				if (!internalZoom)
-				{
-					focusView = null;
-				}
-			});
-
-			// Returns the scale and the center of the window in model units
-			var getView = function()
-			{
-				var view = graph.view;
-				var s = view.scale;
-
-				return {scale: s, center: new mxPoint(
-					(lightbox.scrollLeft + lightbox.clientWidth / 2) / s - view.translate.x,
-					(lightbox.scrollTop + lightbox.clientHeight / 2) / s - view.translate.y)};
-			};
 
 			// Returns the point in model units for the given client coordinates
 			var getModelPoint = function(x, y)
@@ -4353,6 +4366,9 @@
 					tr0.y + (lightbox.scrollTop - top) / s0), zoomDuration);
 			};
 
+			// Moves the cell to the center, zooming a little if needed, and makes
+			// it glow, eg. for Select in Diagram of the explorer. Clicks only
+			// make cells glow.
 			graph.focusCell = function(cell)
 			{
 				var state = this.view.getState(cell);
@@ -4364,16 +4380,7 @@
 					if (this.getFocusScale(state) != this.view.scale)
 					{
 						stopScroll();
-						internalZoom = true;
-
-						try
-						{
-							this.animateViewToCell(cell, null, clampScroll);
-						}
-						finally
-						{
-							internalZoom = false;
-						}
+						this.animateViewToCell(cell, null, clampScroll);
 					}
 					else
 					{
@@ -4401,11 +4408,11 @@
 						mxConstants.NONE) != mxConstants.NONE);
 			};
 
-			// Returns the cell that a click on the given cell centers and
-			// highlights: the connector of a label of a connector, the table of
-			// a row or cell, which the table paints, the stack of an unpainted
-			// part, eg. the class of a field, or else the cell, eg. text in a
-			// lane, a frame or a group.
+			// Returns the cell that a click on the given cell highlights: the
+			// connector of a label of a connector, the table of a row or cell,
+			// which the table paints, the stack of an unpainted part, eg. the
+			// class of a field, or else the cell, eg. text in a lane, a frame or
+			// a group.
 			var getGlowCell = function(cell)
 			{
 				var model = graph.model;
@@ -4453,12 +4460,9 @@
 				return result;
 			};
 
-			// A click centers the cell, or the point on the background. The click
+			// A click makes the cell glow without moving the view. The click
 			// handler of the lightbox ignores graph.click and handles links.
-			var lastClick = null;
 			var down = null;
-			var downView = null;
-			var downPoint = null;
 
 			var clickListener =
 			{
@@ -4467,8 +4471,6 @@
 					ForceExplorer.fireInput();
 					stopScroll();
 					down = new mxPoint(me.getX(), me.getY());
-					downView = getView();
-					downPoint = getModelPoint(me.getX(), me.getY());
 				},
 				mouseMove: function() {},
 				mouseUp: function(sender, me)
@@ -4481,25 +4483,16 @@
 						(src == null || src.closest == null || src.closest('a') == null))
 					{
 						var cell = me.getCell();
-						lastClick = {cell: cell, time: Date.now(), view: downView, point: downPoint};
 
-						// A click on the background removes the highlight, or centers
-						// the point if no cell is highlighted
+						// A click on the background removes the highlight
 						if (cell == null && glowCell != null)
 						{
-							graph.focusCell(null);
+							setGlow(null);
 							exploreCell = null;
 						}
-						else if (cell == null)
+						else if (cell != null && graph.getLinkForCell(cell) == null)
 						{
-							var pt = mxUtils.convertPoint(lightbox, me.getX(), me.getY());
-							pt = clampScroll(pt.x - lightbox.clientWidth / 2,
-								pt.y - lightbox.clientHeight / 2);
-							scrollTo(pt.x, pt.y);
-						}
-						else if (graph.getLinkForCell(cell) == null)
-						{
-							graph.focusCell(getGlowCell(cell));
+							setGlow(getGlowCell(cell));
 							exploreCell = getExploreTarget(cell);
 						}
 					}
@@ -4510,92 +4503,9 @@
 
 			graph.addMouseListener(clickListener);
 
-			// A double click on a cell or the background moves the cell or the
-			// point to the center and zooms in to 100%, or twice the scale from
-			// 100%. The next double click goes back to the previous view. The
-			// first click moved the cell or the point away from the mouse and
-			// changed the view.
-			var toggleFocus = function(cell, evt)
-			{
-				var recent = lastClick != null && Date.now() - lastClick.time < 600;
-				cell = (recent) ? lastClick.cell : cell;
-				var prev = (recent && lastClick.view != null) ? lastClick.view : getView();
-				var point = (recent && lastClick.point != null) ? lastClick.point :
-					((evt != null) ? getModelPoint(mxEvent.getClientX(evt),
-					mxEvent.getClientY(evt)) : null);
-				var view = graph.view;
-				stopScroll();
-				internalZoom = true;
+			// Double clicks do nothing and do not select the text of labels
+			graph.dblClick = function() {};
 
-				try
-				{
-					if (focusView != null)
-					{
-						graph.animateView(focusView.center, focusView.scale,
-							zoomDuration, clampScroll);
-						focusView = null;
-					}
-					else
-					{
-						var state = view.getState(getGlowCell(cell));
-						var center = null;
-
-						if (state != null && state.shape != null)
-						{
-							if (graph.getLinkForCell(cell) == null)
-							{
-								center = new mxPoint(state.getCenterX() / view.scale -
-									view.translate.x, state.getCenterY() / view.scale -
-									view.translate.y);
-							}
-						}
-						else if (cell == null)
-						{
-							center = point;
-						}
-
-						if (center != null)
-						{
-							var steps = graph.getZoomSteps();
-							var scale = (prev.scale < 1) ? 1 :
-								Math.min(prev.scale * 2, steps[steps.length - 1]);
-							graph.animateView(center, scale, zoomDuration, clampScroll);
-							focusView = prev;
-
-							if (state != null)
-							{
-								exploreCell = getExploreTarget(cell);
-								setGlow(state.cell);
-							}
-						}
-					}
-				}
-				finally
-				{
-					internalZoom = false;
-				}
-			};
-
-			graph.dblClick = function(evt, cell)
-			{
-				toggleFocus(cell, evt);
-			};
-
-			// The browser sends the dblclick event to the document if the first
-			// click scrolled the content under the mouse
-			var dblClickHandler = function(evt)
-			{
-				var src = mxEvent.getSource(evt);
-
-				if (src == document.documentElement || src == document.body)
-				{
-					toggleFocus(null, evt);
-				}
-			};
-
-			mxEvent.addListener(document.documentElement, 'dblclick', dblClickHandler);
-
-			// Double clicks do not select the text of labels
 			mxEvent.addListener(lightbox, 'mousedown', function(evt)
 			{
 				if (evt.detail > 1)
@@ -4893,7 +4803,6 @@
 			{
 				setGlow(null);
 				exploreCell = null;
-				focusView = null;
 				updateExploreButton();
 				updatePageName();
 			});
@@ -5082,9 +4991,7 @@
 					laserOn = false;
 					updateLaser();
 					mxEvent.removeListener(document.documentElement, 'keydown', keydownHandler);
-					mxEvent.removeListener(document.documentElement, 'dblclick', dblClickHandler);
 					graph.removeMouseListener(clickListener);
-					graph.dblClick = function() {};
 					stopScroll();
 					editorUi.keyHandler.setEnabled(keyHandlerEnabled);
 					frame.style.pointerEvents = 'none';
@@ -5265,7 +5172,7 @@
 		// cells inside it are added, connected or resized, so the diagram is
 		// assembled directly on the canvas with the full editing UX instead.
 		// Styles and seed cells mirror the Advanced sidebar layout containers.
-		var addInsertLayoutAction = function(method, containerStyle, edgeStyle, seed)
+		var addInsertLayoutAction = function(method, def, edgeStyle, seed)
 		{
 			editorUi.actions.put(method, new Action(mxResources.get(method), function()
 			{
@@ -5277,17 +5184,19 @@
 					// layout manager lays the seed out on insert, anchored
 					// at the seeds' top-left.
 					var container = new mxCell('',
-						new mxGeometry(0, 0, 0, 0), containerStyle);
+						new mxGeometry(0, 0, 0, 0), def.style);
 					container.vertex = true;
 
 					var pt = graph.getFreeInsertPoint();
 					var vertices = [];
 
+					// The first seed cell is the root
 					for (var i = 0; i < seed.nodes.length; i++)
 					{
-						var v = new mxCell(seed.nodes[i], new mxGeometry(
-							pt.x + 20, pt.y + 20, 100, 40),
-							'whiteSpace=wrap;html=1;');
+						var root = i == 0 && def.rootStyle != null;
+						var size = (!root && def.vertexSize != null) ? def.vertexSize : [100, 40];
+						var v = new mxCell(seed.nodes[i], new mxGeometry(pt.x + 20, pt.y + 20,
+							size[0], size[1]), (root) ? def.rootStyle : def.vertexStyle);
 						v.vertex = true;
 						vertices.push(container.insert(v));
 					}
@@ -5315,11 +5224,15 @@
 		var treeSeed = {nodes: ['Root', 'Child 1', 'Child 2'], edges: [[0, 1], [0, 2]]};
 		var flowSeed = {nodes: ['Start', 'Task', 'Task', 'End'],
 			edges: [[0, 1], [0, 2], [1, 3], [2, 3]]};
+		var balloonSeed = {nodes: ['Root', 'Child 1', 'Child 2', 'Child 3', 'Child 1.1',
+			'Child 1.2', 'Child 2.1', 'Child 2.2', 'Child 3.1', 'Child 3.2'],
+			edges: [[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 7], [3, 8], [3, 9]]};
 
 		var addLayoutContainerAction = function(name, seed)
 		{
-			addInsertLayoutAction(name, Menus.layoutContainers[name].style,
-				Menus.layoutContainerEdgeStyle, seed);
+			var def = Menus.layoutContainers[name];
+			addInsertLayoutAction(name, def, (def.edgeStyle != null) ?
+				def.edgeStyle : Menus.layoutContainerEdgeStyle, seed);
 		};
 
 		addLayoutContainerAction('horizontalFlow', flowSeed);
@@ -5327,6 +5240,9 @@
 		addLayoutContainerAction('horizontalTree', treeSeed);
 		addLayoutContainerAction('verticalTree', treeSeed);
 		addLayoutContainerAction('radialTree', treeSeed);
+		addLayoutContainerAction('balloonTree', balloonSeed);
+		addLayoutContainerAction('mindmap', {nodes: ['Central Idea', 'Topic', 'Topic',
+			'Topic', 'Topic'], edges: [[0, 1], [0, 2], [0, 3], [0, 4]]});
 		addLayoutContainerAction('organic', treeSeed);
 		addLayoutContainerAction('circle', treeSeed);
 
@@ -5536,6 +5452,13 @@
 
 		this.put('insert', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
+			// Shape picker at the location of the background context menu
+			// (see addPopupMenuItems in EditorUi)
+			if (!Editor.passiveScroll && graph._contextMenuScreenPoint != null)
+			{
+				editorUi.menus.addMenuItems(menu, ['showShapePicker', '-'], parent);
+			}
+
 			if (Editor.passiveScroll)
 			{
 				editorUi.menus.addMenuItems(menu, ['showShapePicker'], parent);
@@ -5618,8 +5541,8 @@
 		this.put('insertLayout', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
 			this.addMenuItems(menu, ['horizontalFlow', 'verticalFlow', '-',
-				'horizontalTree', 'verticalTree', 'radialTree', '-',
-				'organic', 'circle'], parent);
+				'horizontalTree', 'verticalTree', 'radialTree', 'balloonTree', 'mindmap', '-',
+				'organic', 'circle', '-', 'fromOutline'], parent);
 		})));
 
 		editorUi.actions.put('csv', new Action(mxResources.get('csv') + '...', function()
@@ -6140,7 +6063,7 @@
 		viewPanelsMenu.funct = function(menu, parent)
 		{
 			editorUi.menus.addMenuItems(menu, ['toggleShapes', 'format', 'ruler', '-',
-				'findReplace', 'layers', 'tags', 'outline'], parent);
+				'findReplace', 'layers', 'tags', 'outline', 'textOutline'], parent);
 
 			// Comments opens a window so it shares the section with the panels
 			if (editorUi.commentsSupported())
@@ -6177,7 +6100,7 @@
 				}
 				
 				editorUi.menus.addMenuItems(menu, ['-', 'findReplace',
-					'layers', 'tags', 'outline'], parent);
+					'layers', 'tags', 'outline', 'textOutline'], parent);
 				
 				// Comments opens a window so it shares the section with the panels
 				if (editorUi.commentsSupported())
@@ -6190,7 +6113,7 @@
 			}
 			else
 			{
-				this.addMenuItems(menu, (['format', 'outline', 'layers', 'tags']).
+				this.addMenuItems(menu, (['format', 'outline', 'textOutline', 'layers', 'tags']).
 					concat((editorUi.commentsSupported()) ?
 					['comments', '-'] : ['-']));
 				
@@ -6257,7 +6180,11 @@
 				if (editorUi.pages.length > 1)
 				{
 					editorUi.menus.addSubmenu('movePage', menu, parent, mxResources.get('move'));
-					menu.addSeparator(parent);
+				}
+
+				if (editorUi.isPageGroupsEnabled())
+				{
+					editorUi.menus.addSubmenu('pageGroup', menu, parent, mxResources.get('group'));
 				}
 
 				this.addMenuItems(menu, ['-', 'duplicatePage'], parent);
@@ -6287,16 +6214,30 @@
 			
 			if (editorUi.pages != null)
 			{
+				// Pages in groups are added to a submenu for each group
+				var groups = editorUi.isPageGroupsEnabled();
+				var groupItem = null;
+				var lastGroup = null;
+
 				for (var i = 0; i < editorUi.pages.length; i++)
 				{
 					(mxUtils.bind(this, function(index)
 					{
+						var group = (groups) ? editorUi.pages[index].getGroup() : null;
 						var item = null;
-					
+
+						if (group != lastGroup)
+						{
+							groupItem = (group != null) ? menu.addItem(group, null, null, parent) : null;
+							lastGroup = group;
+						}
+
+						var itemParent = (groupItem != null) ? groupItem : parent;
+
 						if (editorUi.pages[index] == page && !editorUi.editor.graph.isLightboxView() &&
 							editorUi.editor.graph.isEnabled())
 						{
-							item = editorUi.menus.addSubmenu('currentPage', menu, parent,
+							item = editorUi.menus.addSubmenu('currentPage', menu, itemParent,
 								editorUi.getShortPageName(page));
 						}
 						else
@@ -6305,7 +6246,7 @@
 								null, mxUtils.bind(this, function()
 							{
 								editorUi.selectPage(editorUi.pages[index]);
-							}), parent);
+							}), itemParent);
 						}
 
 						var id = editorUi.pages[index].getId();
@@ -6313,10 +6254,15 @@
 							' (' + (index + 1) + '/' + editorUi.pages.length + ')' +
 							((id != null) ? ' [' + id + ']' : ''));
 						
-						// Adds checkmark to current page
+						// Adds checkmark to current page and its group
 						if (editorUi.pages[index] == page)
 						{
 							menu.addCheckmark(item, Editor.checkmarkImage);
+
+							if (groupItem != null)
+							{
+								menu.addCheckmark(groupItem, Editor.checkmarkImage);
+							}
 						}
 					}))(i);
 				}
@@ -6324,7 +6270,7 @@
 				if (!editorUi.editor.graph.isLightboxView())
 				{
 					menu.addSeparator(parent);
-					this.addMenuItems(menu, ['sortPages'], parent);
+					this.addMenuItems(menu, ['sortPages', 'pageGroups'], parent);
 
 					menu.addItem(mxResources.get('deleteAll'), null, mxUtils.bind(this, function()
 					{
@@ -6576,12 +6522,61 @@
 						{
 							menu.addItem(editorUi.getShortPageName(editorUi.pages[index]), null, function()
 							{
-								editorUi.movePage(current, index);
+								var target = editorUi.pages[index];
+
+								// Takes the place and the group of the page
+								if (editorUi.isPageGroupsEnabled() && target != null)
+								{
+									editorUi.movePageToGroup(current, index, target.getGroup());
+								}
+								else
+								{
+									editorUi.movePage(current, index);
+								}
+
 								editorUi.scrollToPage(currentPage, true);
 							}, parent);
 						})(i);
 					}
 				}
+			}
+		})));
+
+		this.put('pageGroup', new Menu(mxUtils.bind(this, function(menu, parent)
+		{
+			var page = editorUi.currentPage;
+
+			if (page != null)
+			{
+				var groups = editorUi.getPageGroups();
+
+				for (var i = 0; i < groups.length; i++)
+				{
+					(function(group)
+					{
+						var item = menu.addItem(group, null, function()
+						{
+							editorUi.setPageGroup(page, group);
+						}, parent);
+
+						if (page.getGroup() == group)
+						{
+							menu.addCheckmark(item, Editor.checkmarkImage);
+						}
+					})(groups[i]);
+				}
+
+				menu.addSeparator(parent);
+
+				menu.addItem(mxResources.get('new') + '...', null, function()
+				{
+					editorUi.addPageGroup(page);
+				}, parent);
+
+				menu.addItem(mxResources.get('removeFromGroup'), null, function()
+				{
+					editorUi.setPageGroup(page, null);
+				}, parent, null, page.getGroup() != null);
 			}
 		})));
 
@@ -6666,7 +6661,7 @@
 				if (Editor.currentTheme == 'min')
 				{
 					editorUi.menus.addMenuItems(menu, ['toggleShapes', 'format',
-						'layers', 'tags', '-', 'findReplace'], parent);
+						'layers', 'tags', 'textOutline', '-', 'findReplace'], parent);
 			
 					if (editorUi.commentsSupported())
 					{
@@ -6698,7 +6693,7 @@
 				}
 
 				editorUi.menus.addMenuItems(menu, ['toggleShapes', 'format',
-					'layers', 'tags', '-'], parent);
+					'layers', 'tags', 'textOutline', '-'], parent);
 				editorUi.menus.addMenuItems(menu, ['pageSetup'], parent);
 			}
 			else if (Editor.currentTheme != 'min')

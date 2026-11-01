@@ -189,46 +189,64 @@ mxSelectionCellsHandler.prototype.refresh = function(refreshHandlers)
 		}
 	}
 
-	// Destroys or updates old handlers
-	for (var i = 0; i < tmp.length; i++)
+	// Removes the listeners of the destroyed handlers in one pass
+	var sources = [this.graph, this.graph.getView(), this.graph.getModel()];
+
+	for (var i = 0; i < sources.length; i++)
 	{
-		var state = this.graph.view.getState(tmp[i]);
+		sources[i].beginRemoveListeners();
+	}
 
-		if (state != null)
+	try
+	{
+		// Destroys or updates old handlers
+		for (var i = 0; i < tmp.length; i++)
 		{
-			var handler = oldHandlers.remove(tmp[i]);
+			var state = this.graph.view.getState(tmp[i]);
 
-			if (handler != null)
+			if (state != null)
 			{
-				if (handler.state != state)
+				var handler = oldHandlers.remove(tmp[i]);
+
+				if (handler != null)
 				{
-					handler.destroy();
-					handler = null;
-				}
-				else if (!this.isHandlerActive(handler))
-				{
-					if (refreshHandlers)
+					if (handler.state != state)
 					{
-						handler.refresh();
+						handler.destroy();
+						handler = null;
 					}
+					else if (!this.isHandlerActive(handler))
+					{
+						if (refreshHandlers)
+						{
+							handler.refresh();
+						}
 
-					handler.redraw();
+						handler.redraw();
+					}
 				}
-			}
 			
-			if (handler != null)
-			{
-				this.handlers.put(tmp[i], handler);
+				if (handler != null)
+				{
+					this.handlers.put(tmp[i], handler);
+				}
 			}
 		}
-	}
 	
-	// Destroys unused handlers
-	oldHandlers.visit(mxUtils.bind(this, function(key, handler)
+		// Destroys unused handlers
+		oldHandlers.visit(mxUtils.bind(this, function(key, handler)
+		{
+			this.fireEvent(new mxEventObject(mxEvent.REMOVE, 'state', handler.state));
+			handler.destroy();
+		}));
+	}
+	finally
 	{
-		this.fireEvent(new mxEventObject(mxEvent.REMOVE, 'state', handler.state));
-		handler.destroy();
-	}));
+		for (var i = 0; i < sources.length; i++)
+		{
+			sources[i].endRemoveListeners();
+		}
+	}
 	
 	// Creates new handlers and updates parent highlight on existing handlers
 	for (var i = 0; i < tmp.length; i++)

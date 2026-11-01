@@ -556,25 +556,28 @@ mxText.prototype.updateBoundingBox = function()
 	var node = this.node;
 	this.boundingBox = this.bounds.clone();
 	var rot = this.getTextRotation();
-	
-	var h = (this.style != null) ? mxUtils.getValue(this.style, mxConstants.STYLE_LABEL_POSITION, mxConstants.ALIGN_CENTER) : null;
-	var v = (this.style != null) ? mxUtils.getValue(this.style, mxConstants.STYLE_VERTICAL_LABEL_POSITION, mxConstants.ALIGN_MIDDLE) : null;
 
-	if (!this.ignoreStringSize && node != null && this.overflow != 'fill' && (!this.clipped ||
-		!this.ignoreClippedStringSize || h != mxConstants.ALIGN_CENTER || v != mxConstants.ALIGN_MIDDLE))
+	if (this.isStringSizeMeasured())
 	{
 		var ow = null;
 		var oh = null;
 		
 		if (node.ownerSVGElement != null)
 		{
-			if (node.firstChild != null && node.firstChild.firstChild != null &&
-				node.firstChild.firstChild.nodeName == 'foreignObject' &&
-				node.firstChild.firstChild.firstChild != null &&
-				node.firstChild.firstChild.firstChild.firstChild != null)
+			var fo = (node.firstChild != null) ? node.firstChild.firstChild : null;
+
+			// Skips the alternate content of labels in other documents (see
+			// mxSvgCanvas2D.text)
+			if (fo != null && fo.nodeName == 'switch')
+			{
+				fo = fo.firstChild;
+			}
+
+			if (fo != null && fo.nodeName == 'foreignObject' &&
+				fo.firstChild != null && fo.firstChild.firstChild != null)
 			{
 				// Uses second inner DIV for font metrics
-				node = node.firstChild.firstChild.firstChild.firstChild;
+				node = fo.firstChild.firstChild;
 				oh = node.offsetHeight * this.scale;
 				
 				if (this.overflow == 'width')
@@ -588,6 +591,14 @@ mxText.prototype.updateBoundingBox = function()
 			}
 			else
 			{
+				// Measures the texts of the pending backgrounds of plain text
+				// labels at once if the background of this label is pending, as
+				// it is part of the measured node
+				if (mxSvgCanvas2D.isTextBackgroundPending(node))
+				{
+					mxSvgCanvas2D.measureTextBackgrounds();
+				}
+
 				try
 				{
 					var b = node.getBBox();
@@ -674,6 +685,22 @@ mxText.prototype.updateBoundingBox = function()
 			this.unrotatedBoundingBox = null;
 		}
 	}
+};
+
+/**
+ * Function: isStringSizeMeasured
+ *
+ * Returns true if <updateBoundingBox> measures the text in the DOM. Labels
+ * with <ignoreStringSize>, overflow=fill and clipped labels in the middle of
+ * their shape with <ignoreClippedStringSize> have the box of their bounds.
+ */
+mxText.prototype.isStringSizeMeasured = function()
+{
+	var h = (this.style != null) ? mxUtils.getValue(this.style, mxConstants.STYLE_LABEL_POSITION, mxConstants.ALIGN_CENTER) : null;
+	var v = (this.style != null) ? mxUtils.getValue(this.style, mxConstants.STYLE_VERTICAL_LABEL_POSITION, mxConstants.ALIGN_MIDDLE) : null;
+
+	return !this.ignoreStringSize && this.node != null && this.overflow != 'fill' && (!this.clipped ||
+		!this.ignoreClippedStringSize || h != mxConstants.ALIGN_CENTER || v != mxConstants.ALIGN_MIDDLE);
 };
 
 /**

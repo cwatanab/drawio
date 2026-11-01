@@ -427,7 +427,7 @@ Menus.prototype.init = function()
 	this.put('view', new Menu(mxUtils.bind(this, function(menu, parent)
 	{
 		this.addMenuItems(menu, ((this.editorUi.format != null) ? ['format'] : []).
-			concat(['outline', 'layers', '-', 'pageView', 'pageScale', '-', 'tooltips',
+			concat(['outline', 'textOutline', 'layers', '-', 'pageView', 'pageScale', '-', 'tooltips',
 			        'grid', 'guides', '-', 'connectionArrows', 'connectionPoints', '-',
 			        'resetView', 'zoomIn', 'zoomOut'], parent));
 	})));
@@ -439,7 +439,7 @@ Menus.prototype.init = function()
 			this.addMenuItems(menu, ['format'], parent);
 		}
 		
-		this.addMenuItems(menu, ['outline', 'layers'], parent);
+		this.addMenuItems(menu, ['outline', 'textOutline', 'layers'], parent);
 	})));
 	this.put('viewZoom', new Menu(mxUtils.bind(this, function(menu, parent)
 	{
@@ -830,9 +830,10 @@ Menus.prototype.addInsertTableItem = function(menu, insertFn, parent, showOption
 	
 	insertFn = (insertFn != null) ? insertFn : mxUtils.bind(this, function(evt, rows, cols)
 	{
-		var td = graph.getParentByName(mxEvent.getSource(evt), 'TD');
+		// Clicks must be on a cell of the picker, keystrokes come from the picker
+		var td = (evt.type == 'keydown') ? null : graph.getParentByName(mxEvent.getSource(evt), 'TD');
 
-		if (td != null && graph.cellEditor.textarea != null)
+		if ((td != null || evt.type == 'keydown') && graph.cellEditor.textarea != null)
 		{
 			// To find the new link, we create a list of all existing links first
     		// LATER: Refactor for reuse with code for finding inserted image below
@@ -1000,45 +1001,42 @@ Menus.prototype.addInsertTableItem = function(menu, insertFn, parent, showOption
 	
 	var row2 = null;
 	var td = null;
-	
+	var selectedRow = 0;
+	var selectedCol = 0;
+
+	// Selects the cells up to the given row and column index and extends the
+	// picker by the given number of rows and columns
+	function selectSize(rowIndex, colIndex, ext)
+	{
+		selectedRow = rowIndex;
+		selectedCol = colIndex;
+		extendPicker(picker, Math.min(20, rowIndex + ext), Math.min(20, colIndex + ext));
+		label.innerHTML = (colIndex + 1) + 'x' + (rowIndex + 1);
+
+		for (var i = 0; i < picker.rows.length; i++)
+		{
+			var r = picker.rows[i];
+
+			for (var j = 0; j < r.cells.length; j++)
+			{
+				r.cells[j].style.backgroundColor = (i <= rowIndex && j <= colIndex) ?
+					'blue' : 'transparent';
+			}
+		}
+	};
+
 	function mouseover(e)
 	{
-		td = graph.getParentByName(mxEvent.getSource(e), 'TD');		
+		td = graph.getParentByName(mxEvent.getSource(e), 'TD');
 		var selected = false;
-		
+
 		if (td != null)
 		{
 			row2 = graph.getParentByName(td, 'TR');
-			var ext = (mxEvent.isMouseEvent(e)) ? 2 : 4;
-			extendPicker(picker, Math.min(20, row2.sectionRowIndex + ext), Math.min(20, td.cellIndex + ext));
-			label.innerHTML = (td.cellIndex + 1) + 'x' + (row2.sectionRowIndex + 1);
-			
-			for (var i = 0; i < picker.rows.length; i++)
-			{
-				var r = picker.rows[i];
-				
-				for (var j = 0; j < r.cells.length; j++)
-				{
-					var cell = r.cells[j];
-					
-					if (i == row2.sectionRowIndex &&
-						j == td.cellIndex)
-					{
-						selected = cell.style.backgroundColor == 'blue';
-					}
-					
-					if (i <= row2.sectionRowIndex && j <= td.cellIndex)
-					{
-						cell.style.backgroundColor = 'blue';
-					}
-					else
-					{
-						cell.style.backgroundColor = 'transparent';
-					}
-				}
-			}
+			selected = td.style.backgroundColor == 'blue';
+			selectSize(row2.sectionRowIndex, td.cellIndex, (mxEvent.isMouseEvent(e)) ? 2 : 4);
 		}
-		
+
 		mxEvent.consume(e);
 
 		return selected;
@@ -1062,6 +1060,69 @@ Menus.prototype.addInsertTableItem = function(menu, insertFn, parent, showOption
 	}));
 	
 	mxEvent.addListener(picker, 'mouseover', mouseover);
+
+	// The picker is an item for the keyboard: the arrow keys change the size,
+	// Enter and Space insert the table with the modifiers of a click and Tab
+	// moves between the picker and the options (see mxPopupMenu.keyDown)
+	var options = (showOptions) ? [elt2, titleOption, containerOption] : [elt2];
+	elt2.menuParent = (parent != null) ? parent : menu;
+	label.setAttribute('aria-live', 'polite');
+
+	mxEvent.addListener(elt2, 'focus', function()
+	{
+		selectSize(selectedRow, selectedCol, 2);
+	});
+
+	mxEvent.addListener(elt2, 'keydown', mxUtils.bind(this, function(evt)
+	{
+		var source = mxEvent.getSource(evt);
+		var modified = mxEvent.isAltDown(evt) || mxEvent.isControlDown(evt) ||
+			mxEvent.isMetaDown(evt);
+		var dr = (evt.keyCode == 38) ? -1 : ((evt.keyCode == 40) ? 1 : 0);
+		var dc = (evt.keyCode == 37) ? -1 : ((evt.keyCode == 39) ? 1 : 0);
+
+		if (source == elt2 && (dr != 0 || dc != 0) && !modified && !mxEvent.isShiftDown(evt) &&
+			selectedRow + dr >= 0 && selectedRow + dr < 20 &&
+			selectedCol + dc >= 0 && selectedCol + dc < 20)
+		{
+			selectSize(selectedRow + dr, selectedCol + dc, 2);
+			mxEvent.consume(evt);
+		}
+		else if (evt.keyCode == 13 /* Enter */ || (source == elt2 && evt.keyCode == 32 /* Space */))
+		{
+			var focus = (menu.actionFocus != null) ? menu.actionFocus : menu.returnFocus;
+			insertFn(evt, selectedRow + 1, selectedCol + 1, titleOption.checked, containerOption.checked);
+			this.editorUi.hideCurrentMenu();
+
+			if (document.activeElement == null || document.activeElement == document.body)
+			{
+				menu.restoreFocus(focus);
+			}
+
+			mxEvent.consume(evt);
+		}
+		else if (evt.keyCode == 9 /* Tab */ && options.length > 1 && !modified)
+		{
+			var next = options[mxUtils.mod(mxUtils.indexOf(options, source) +
+				((mxEvent.isShiftDown(evt)) ? -1 : 1), options.length)];
+
+			if (next == elt2)
+			{
+				menu.focusItem(elt2);
+			}
+			else
+			{
+				next.focus();
+			}
+
+			mxEvent.consume(evt);
+		}
+		// Escape in the options closes the menu as in the picker
+		else if (source != elt2 && evt.keyCode == 27 /* Escape */ && menu.keyDown(evt, elt2))
+		{
+			mxEvent.consume(evt);
+		}
+	}));
 };
 
 /**
@@ -1486,7 +1547,7 @@ Menus.prototype.addShortcut = function(item, action, asTooltip)
 		{
 			var td = item.firstChild.nextSibling.nextSibling;	
 			var span = document.createElement('span');
-			span.style.color = 'gray';
+			span.className = 'geMenuShortcut';
 			mxUtils.write(span, action.shortcut);
 			td.appendChild(span);
 		}
@@ -1769,6 +1830,16 @@ Menus.prototype.addPopupMenuCellItems = function(menu, cell, evt)
 		{
 			this.addMenuItems(menu, ['clearWaypoints'], null, evt);
 		}
+
+		if (this.isShowCellEditItems() && ss.vertices.length == 0 && ss.edges.length > 1)
+		{
+			this.addMenuItems(menu, ['bundle'], null, evt);
+		}
+
+		if (this.isShowCellEditItems() && graph.hasTies(graph.getSelectionCells()))
+		{
+			this.addMenuItems(menu, ['unbundle'], null, evt);
+		}
 		
 		if (this.isShowCellEditItems() &&
 			graph.getSelectionCount() == 1 &&
@@ -1919,7 +1990,8 @@ Menus.prototype.menuCreated = function(menu, elt, className)
 		menu.addListener('stateChanged', function()
 		{
 			elt.enabled = menu.enabled;
-			
+			elt.setAttribute('aria-disabled', (menu.enabled) ? 'false' : 'true');
+
 			if (!menu.enabled)
 			{
 				elt.className = className + ' mxDisabled';

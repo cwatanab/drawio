@@ -100,17 +100,24 @@ ForceExplorer.prototype.maxDepth = 6;
 /**
  * Space at the border and at the top of the container, where the title and
  * the buttons are, in screen units that the nodes of the levels must not
- * use, the maximum number of steps and the time in
- * milliseconds for predicting the layout of the levels (see predictBounds),
- * the tolerance for the differences between the predicted and the actual
- * layout and the hysteresis for removing levels that no longer fit.
+ * use, the maximum number of steps and the time in milliseconds for
+ * predicting the layout of the levels (see predictBounds), the factor for
+ * the scale at which the predicted layout of the next level must fit when
+ * zooming out, and the hysteresis for removing levels when zooming in. With
+ * 0.9 the next level is added once it needs at most 111% of the container,
+ * about halfway in zoom between 1.1 (all of the next level inside with a
+ * margin), which waited until the container was half empty, and the levels
+ * of the zoom alone (see levelScale), which added levels while the levels
+ * that were shown did not fit yet (Gaudenz, 2026-10-22). Levels are removed
+ * when zooming in by the hysteresis, about one step of the zoom buttons,
+ * from where they were added.
  */
 ForceExplorer.prototype.fitMargin = 24;
 ForceExplorer.prototype.fitTop = 56;
 ForceExplorer.prototype.maxPredictTicks = 300;
 ForceExplorer.prototype.maxPredictTime = 60;
-ForceExplorer.prototype.predictTolerance = 1.1;
-ForceExplorer.prototype.fitHysteresis = 1.15;
+ForceExplorer.prototype.predictTolerance = 0.9;
+ForceExplorer.prototype.fitHysteresis = 1.25;
 
 /**
  * Animation parameters. Durations are in milliseconds, the bullet
@@ -193,6 +200,7 @@ ForceExplorer.prototype.init = function(cell, modelCoordinates)
 	this.previousFocus = document.activeElement;
 	container.setAttribute('tabindex', '-1');
 	container.style.outline = 'none';
+	container.style.outlineOffset = '-2px';
 	container.focus({preventScroll: true});
 
 	var graph = new Graph(container);
@@ -232,13 +240,26 @@ ForceExplorer.prototype.init = function(cell, modelCoordinates)
 	// page and file provide values that the clones do not have
 	var graphReplacePlaceholders = graph.replacePlaceholders;
 
-	graph.replacePlaceholders = function(cell, str, vars, translate)
+	graph.replacePlaceholders = function(cell, str, vars, translate, escapeData)
 	{
 		var source = (cell != null) ? cell.forceSource : null;
 
 		return (source != null && sourceGraph.model.contains(source)) ?
-			sourceGraph.replacePlaceholders(source, str, vars, translate) :
+			sourceGraph.replacePlaceholders(source, str, vars, translate, escapeData) :
 			graphReplacePlaceholders.apply(this, arguments);
+	};
+
+	// Applies the style rules and the data sources of the page of the cells in
+	// the diagram, which the model of the clones does not have
+	var graphApplyDataStyles = graph.applyDataStyles;
+
+	graph.applyDataStyles = function(cell, style)
+	{
+		var source = (cell != null) ? cell.forceSource : null;
+
+		return (source != null && sourceGraph.model.contains(source)) ?
+			sourceGraph.applyDataStyles(source, style) :
+			graphApplyDataStyles.apply(this, arguments);
 	};
 
 	// Tooltips of the source graph, also pending ones, would be shown above
@@ -663,12 +684,16 @@ ForceExplorer.restoreFocus = function(elt)
  */
 ForceExplorer.prototype.addControls = function()
 {
-	// Leaves space for the select and close buttons on the right
+	// Leaves space for the select and close buttons on the right and has their
+	// height, so that the title is centered on their row with or without the
+	// back button, which is only shown if there is a previous shape and moves
+	// the title to the right
 	var panel = document.createElement('div');
 	panel.style.position = 'absolute';
 	panel.style.left = '14px';
 	panel.style.right = '104px';
 	panel.style.top = '12px';
+	panel.style.height = '36px';
 	panel.style.pointerEvents = 'none';
 	panel.style.display = 'flex';
 	panel.style.alignItems = 'center';
@@ -677,22 +702,22 @@ ForceExplorer.prototype.addControls = function()
 
 	this.backButton = this.createButton('‹', mxResources.get('back'),
 		mxUtils.bind(this, this.back));
-	this.backButton.style.visibility = 'hidden';
+	this.backButton.style.display = 'none';
 	this.backButton.style.pointerEvents = 'auto';
 	this.backButton.style.flexShrink = '0';
 	panel.appendChild(this.backButton);
 
+	// The title is one line that ends with an ellipsis if it does not fit
 	var info = document.createElement('div');
 	info.style.pointerEvents = 'none';
 	info.style.minWidth = '0';
 	this.titleElt = document.createElement('div');
 	this.titleElt.style.fontSize = '16px';
 	this.titleElt.style.fontWeight = 'bold';
+	this.titleElt.style.whiteSpace = 'nowrap';
+	this.titleElt.style.overflow = 'hidden';
+	this.titleElt.style.textOverflow = 'ellipsis';
 	info.appendChild(this.titleElt);
-	this.levelElt = document.createElement('div');
-	this.levelElt.style.fontSize = '12px';
-	this.levelElt.style.opacity = '0.7';
-	info.appendChild(this.levelElt);
 	panel.appendChild(info);
 	this.container.appendChild(panel);
 
@@ -721,6 +746,15 @@ ForceExplorer.prototype.addControls = function()
 		this.moveCamera(Math.min(1, this.getFitScale(this.getBounds(1))));
 	})));
 	this.container.appendChild(tools);
+	this.tools = tools;
+
+	// Announces the node that the keyboard highlights (see moveHighlight)
+	this.liveRegion = document.createElement('div');
+	this.liveRegion.setAttribute('role', 'status');
+	this.liveRegion.setAttribute('aria-live', 'polite');
+	this.liveRegion.style.cssText = 'position:absolute;width:1px;height:1px;' +
+		'overflow:hidden;clip-path:inset(50%);white-space:nowrap;';
+	this.container.appendChild(this.liveRegion);
 
 	// Selects the focused cell in the diagram and closes, next to close
 	var actions = document.createElement('div');
@@ -783,55 +817,30 @@ ForceExplorer.prototype.createTargetIcon = function()
 };
 
 /**
- * Updates the title, the levels and the back button.
+ * Updates the title and the back button.
  */
 ForceExplorer.prototype.updateInfo = function()
 {
-	var count = 0;
-
-	for (var i = 0; i < this.nodes.length; i++)
-	{
-		if (this.nodes[i].source != null && this.nodes[i].leaving == null)
-		{
-			count++;
-		}
-	}
-
 	this.titleElt.textContent = this.getPlainLabel(this.focusSource) ||
 		mxResources.get('explore');
-	this.levelElt.textContent = mxResources.get('exploreLevels',
-		[this.depth, count], 'Levels: {1} · Shapes: {2}');
-	this.backButton.style.visibility = (this.history.length > 0) ?
-		'visible' : 'hidden';
+	this.backButton.style.display = (this.history.length > 0) ?
+		'flex' : 'none';
 };
 
 /**
- * Returns the label of the given cell of the source graph as plain text.
+ * Maximum number of characters of the title (see getPlainLabel).
+ */
+ForceExplorer.prototype.maxTitleLength = 40;
+
+/**
+ * Returns the first line of the label of the given cell of the source graph
+ * as plain text with an ellipsis if more lines follow, shortened to
+ * maxTitleLength. A class, table or list in one label shows its name
+ * (Gaudenz and Kym, 2026-10-22).
  */
 ForceExplorer.prototype.getPlainLabel = function(cell)
 {
-	var graph = this.sourceGraph;
-	var label = graph.getLabel(cell);
-
-	if (label != null && graph.isHtmlLabel(cell))
-	{
-		// Parses into an inert document, which runs no scripts and loads nothing
-		var doc = new DOMParser().parseFromString(String(label), 'text/html');
-		var breaks = doc.body.querySelectorAll('br, div, p, li, tr');
-
-		// Separates the words of lines
-		for (var i = 0; i < breaks.length; i++)
-		{
-			breaks[i].parentNode.insertBefore(doc.createTextNode(' '),
-				breaks[i].nextSibling);
-		}
-
-		label = doc.body.textContent;
-	}
-
-	label = (label != null) ? mxUtils.trim(String(label).replace(/\s+/g, ' ')) : '';
-
-	return (label.length > 60) ? label.substring(0, 59) + '…' : label;
+	return this.sourceGraph.getPlainLabel(cell, this.maxTitleLength);
 };
 
 /**
@@ -1082,31 +1091,23 @@ ForceExplorer.prototype.installListeners = function()
 		if (!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
 		{
 			ForceExplorer.fireInput();
-
-			if (ForceExplorer.handleButtonKeys(this.container, evt))
-			{
-				// handled
-			}
-			else if (evt.keyCode == 27)
-			{
-				this.destroy();
-			}
-			else if (evt.keyCode == 8 || evt.keyCode == 37)
-			{
-				this.back();
-			}
-			else if (evt.key == '+' || evt.key == '=')
-			{
-				this.zoomBy(1 / this.levelScaleFactor);
-			}
-			else if (evt.key == '-')
-			{
-				this.zoomBy(this.levelScaleFactor);
-			}
-
+			this.keyDown(evt);
 			mxEvent.consume(evt);
 		}
 	});
+
+	// Shows the focus of the keyboard on the diagram inside of its border
+	mxEvent.addListener(this.container, 'focus', mxUtils.bind(this, function()
+	{
+		this.container.style.outline = (this.container.matches == null ||
+			this.container.matches(':focus-visible')) ?
+			'2px solid ' + this.accentColor : 'none';
+	}));
+
+	mxEvent.addListener(this.container, 'blur', mxUtils.bind(this, function()
+	{
+		this.container.style.outline = 'none';
+	}));
 
 	window.addEventListener('keydown', this.keyHandler, true);
 
@@ -1134,6 +1135,266 @@ ForceExplorer.prototype.installListeners = function()
 	graph.view.addListener(mxEvent.SCALE, cameraHandler);
 	graph.view.addListener(mxEvent.TRANSLATE, cameraHandler);
 	graph.view.addListener(mxEvent.SCALE_AND_TRANSLATE, cameraHandler);
+};
+
+/**
+ * Handles the given keystroke. Tab and Shift+Tab move the focus through the
+ * buttons at the top, the diagram and the buttons at the bottom, and in the
+ * diagram through its nodes (see moveTabFocus). In the diagram, the arrow
+ * keys highlight the nearest node in their direction and Enter and Space
+ * show the highlighted node in the center like a click. The arrow keys with
+ * Shift, or on a button, move the focus to the nearest button or the diagram
+ * in their direction. Backspace and Alt+Arrow Left go back, Escape closes
+ * and plus and minus zoom.
+ */
+ForceExplorer.prototype.keyDown = function(evt)
+{
+	var active = document.activeElement;
+	var diagram = active == this.container || !this.container.contains(active);
+	var arrow = evt.keyCode >= 37 && evt.keyCode <= 40;
+
+	if (evt.keyCode == 9 /* Tab */ && !mxEvent.isAltDown(evt))
+	{
+		this.moveTabFocus(mxEvent.isShiftDown(evt));
+	}
+	else if (evt.keyCode == 27 /* Escape */)
+	{
+		this.destroy();
+	}
+	else if (evt.keyCode == 8 /* Backspace */ || (evt.keyCode == 37 &&
+		mxEvent.isAltDown(evt)))
+	{
+		this.back();
+	}
+	else if (arrow && diagram && !mxEvent.isShiftDown(evt))
+	{
+		this.moveHighlight(evt.keyCode);
+	}
+	else if (arrow)
+	{
+		this.focusInDirection((diagram) ? null : active, evt.keyCode);
+	}
+	else if ((evt.keyCode == 13 /* Enter */ || evt.keyCode == 32 /* Space */) && diagram)
+	{
+		var node = this.hover;
+
+		if (node != null && node.leaving == null)
+		{
+			this.setHover(null);
+			this.click(node);
+		}
+	}
+	else if (ForceExplorer.handleButtonKeys(this.container, evt))
+	{
+		// handled
+	}
+	else if (evt.key == '+' || evt.key == '=')
+	{
+		this.zoomBy(1 / this.levelScaleFactor);
+	}
+	else if (evt.key == '-')
+	{
+		this.zoomBy(this.levelScaleFactor);
+	}
+};
+
+/**
+ * Returns the controls for the keyboard in the order of Tab: the buttons at
+ * the top, the diagram, which is the container, and the buttons at the
+ * bottom.
+ */
+ForceExplorer.prototype.getKeyboardStops = function()
+{
+	var buttons = ForceExplorer.getButtons(this.container);
+	var top = [];
+	var bottom = [];
+
+	for (var i = 0; i < buttons.length; i++)
+	{
+		((mxUtils.isAncestorNode(this.tools, buttons[i])) ? bottom : top).push(buttons[i]);
+	}
+
+	return top.concat([this.container], bottom);
+};
+
+/**
+ * Returns the nodes that the keyboard highlights, all nodes but the focused
+ * and the leaving nodes, by level and clockwise from the top.
+ */
+ForceExplorer.prototype.getKeyboardNodes = function()
+{
+	var cx = (this.focus != null) ? this.focus.x : 0;
+	var cy = (this.focus != null) ? this.focus.y : 0;
+	var result = [];
+
+	for (var i = 0; i < this.nodes.length; i++)
+	{
+		var node = this.nodes[i];
+
+		if (node != this.focus && node.leaving == null)
+		{
+			node.keyAngle = mxUtils.mod(Math.atan2(node.y - cy,
+				node.x - cx) + Math.PI / 2, 2 * Math.PI);
+			result.push(node);
+		}
+	}
+
+	result.sort(function(a, b)
+	{
+		return (a.level != b.level) ? a.level - b.level :
+			mxUtils.compareNumbers(a.keyAngle, b.keyAngle);
+	});
+
+	return result;
+};
+
+/**
+ * Moves the focus to the next or previous control (see getKeyboardStops).
+ * In the diagram, Tab highlights the nodes one after the other before it
+ * moves on, and Shift+Tab goes back to no highlight first. Shift+Tab into
+ * the diagram highlights its last node.
+ */
+ForceExplorer.prototype.moveTabFocus = function(back)
+{
+	var stops = this.getKeyboardStops();
+	var index = mxUtils.indexOf(stops, document.activeElement);
+	index = (index < 0) ? mxUtils.indexOf(stops, this.container) : index;
+
+	if (stops[index] == this.container)
+	{
+		var nodes = this.getKeyboardNodes();
+		var i = mxUtils.indexOf(nodes, this.hover);
+
+		if ((back) ? i >= 0 : i + 1 < nodes.length)
+		{
+			this.highlight((back) ? nodes[i - 1] || null : nodes[i + 1]);
+
+			return;
+		}
+
+		this.setHover(null);
+	}
+
+	var next = stops[mxUtils.mod(index + ((back) ? -1 : 1), stops.length)];
+	next.focus();
+
+	if (next == this.container && back)
+	{
+		var nodes = this.getKeyboardNodes();
+		this.highlight(nodes[nodes.length - 1]);
+	}
+};
+
+/**
+ * Highlights the nearest node in the direction of the given arrow key from
+ * the highlighted node or the focused node.
+ */
+ForceExplorer.prototype.moveHighlight = function(keyCode)
+{
+	var from = (this.hover != null && this.hover.leaving == null) ? this.hover : this.focus;
+	var dx = (keyCode == 37) ? -1 : ((keyCode == 39) ? 1 : 0);
+	var dy = (keyCode == 38) ? -1 : ((keyCode == 40) ? 1 : 0);
+	var nodes = this.getKeyboardNodes();
+	var next = null;
+	var min = null;
+
+	for (var i = 0; i < nodes.length && from != null; i++)
+	{
+		if (nodes[i] != from)
+		{
+			// Distance along the direction and across it, in a cone
+			var ex = nodes[i].x - from.x;
+			var ey = nodes[i].y - from.y;
+			var along = ex * dx + ey * dy;
+			var across = Math.abs(ex * dy - ey * dx);
+
+			if (along > 0 && across < 2 * along &&
+				(min == null || along + 2 * across < min))
+			{
+				next = nodes[i];
+				min = along + 2 * across;
+			}
+		}
+	}
+
+	if (next != null)
+	{
+		this.highlight(next);
+	}
+};
+
+/**
+ * Highlights the given node or no node for the keyboard and announces it.
+ */
+ForceExplorer.prototype.highlight = function(node)
+{
+	this.setHover(node);
+
+	if (node != null)
+	{
+		// The cell in the diagram resolves placeholders like the title (see
+		// updateInfo) and has its kind and connections, the clone only the
+		// label for the nodes that show more neighbours
+		this.liveRegion.textContent = (node.source != null) ?
+			this.sourceGraph.getCellDescription(node.source) :
+			this.getPlainLabel(node.cell);
+	}
+};
+
+/**
+ * Moves the focus from the given button, or from the diagram if it is null,
+ * to the nearest button in the direction of the given arrow key, for Arrow
+ * Left and Right from a button in the same row, or into the diagram if there
+ * is none (see EditorUi.getDirectionalDistance).
+ */
+ForceExplorer.prototype.focusInDirection = function(elt, keyCode)
+{
+	var dx = (keyCode == 37) ? -1 : ((keyCode == 39) ? 1 : 0);
+	var dy = (keyCode == 38) ? -1 : ((keyCode == 40) ? 1 : 0);
+	var stops = this.getKeyboardStops();
+	var bounds = null;
+	var next = null;
+	var min = null;
+
+	// The diagram starts from its center
+	if (elt == null)
+	{
+		var c = this.container.getBoundingClientRect();
+		var cx = (c.left + c.right) / 2;
+		var cy = (c.top + c.bottom) / 2;
+		bounds = {left: cx, right: cx, top: cy, bottom: cy};
+	}
+	else
+	{
+		bounds = elt.getBoundingClientRect();
+	}
+
+	for (var i = 0; i < stops.length; i++)
+	{
+		if (stops[i] != elt && stops[i] != this.container)
+		{
+			var dist = EditorUi.prototype.getDirectionalDistance(bounds,
+				stops[i].getBoundingClientRect(), dx, dy, elt != null);
+
+			if (dist != null && (min == null || dist < min))
+			{
+				next = stops[i];
+				min = dist;
+			}
+		}
+	}
+
+	next = (next == null && elt != null) ? this.container : next;
+
+	if (next != null)
+	{
+		if (elt == null)
+		{
+			this.setHover(null);
+		}
+
+		next.focus();
+	}
 };
 
 /**
@@ -1680,10 +1941,10 @@ ForceExplorer.prototype.getScaleForDepth = function(depth)
 
 /**
  * Updates the number of levels when the scale of the view changes (see
- * levelHysteresis). Zooming out adds the next levels only if their nodes are
- * inside of the container once they settled (see predictBounds), and zooming
- * in removes the outer levels whose nodes are no longer inside (see
- * fitHysteresis).
+ * levelHysteresis). Zooming out adds the next levels if their nodes mostly
+ * fit into the container once they settled (see predictBounds and
+ * predictTolerance), and zooming in removes the outer levels whose nodes no
+ * longer fit by the same measure with a hysteresis (see fitHysteresis).
  */
 ForceExplorer.prototype.updateDepth = function()
 {
@@ -1701,8 +1962,11 @@ ForceExplorer.prototype.updateDepth = function()
 
 	if (depth > this.depth)
 	{
-		var max = (zoomIn) ? this.depth : Math.max(this.depth,
-			this.getDepthForScale(s * this.levelHysteresis));
+		// No levels are added while the levels that are shown do not fit once
+		// they settled, eg. right after they were added by a quick zoom
+		var max = (zoomIn || !this.isInside(this.getPredictedBounds(this.depth), s)) ?
+			this.depth : Math.max(this.depth, this.getDepthForScale(
+				s * this.levelHysteresis));
 		depth = this.depth;
 
 		while (depth < max && this.isInside(this.getPredictedBounds(depth + 1),
@@ -1717,7 +1981,7 @@ ForceExplorer.prototype.updateDepth = function()
 	}
 
 	while (zoomIn && depth > 1 && !this.isInside(this.getBounds(depth),
-		s / this.fitHysteresis))
+		s * this.predictTolerance / this.fitHysteresis))
 	{
 		depth--;
 	}
@@ -3161,6 +3425,14 @@ ForceExplorer.prototype.addLinks = function(node)
 			}
 
 			clone.setStyle(mxUtils.setStyle(style, 'noEdgeStyle', '1'));
+
+			// Connectors without a geometry in the diagram get one in the explorer
+			if (clone.geometry == null)
+			{
+				clone.geometry = new mxGeometry();
+				clone.geometry.relative = true;
+			}
+
 			clone.geometry.points = null;
 			clone.geometry.x = 0;
 			clone.geometry.y = 0;
@@ -4741,6 +5013,40 @@ EditorUi.prototype.getExploreCell = function(cell, fallback)
 		}
 
 		return result;
+	};
+
+	// Hides the tooltip of the sidebar when an explorer opens, which is not
+	// hidden by the mouse if the explorer opens with the keyboard, eg. from
+	// the search, while the mouse is over a shape in the sidebar
+	var editorUiInit = EditorUi.prototype.init;
+
+	EditorUi.prototype.init = function()
+	{
+		editorUiInit.apply(this, arguments);
+		var explorer = null;
+
+		this.explorerListener = mxUtils.bind(this, function()
+		{
+			if (ForceExplorer.active != explorer)
+			{
+				explorer = ForceExplorer.active;
+
+				if (explorer != null && this.sidebar != null)
+				{
+					this.sidebar.hideTooltip();
+				}
+			}
+		});
+
+		ForceExplorer.events.addListener('change', this.explorerListener);
+	};
+
+	var editorUiDestroy = EditorUi.prototype.destroy;
+
+	EditorUi.prototype.destroy = function()
+	{
+		ForceExplorer.events.removeListener(this.explorerListener);
+		editorUiDestroy.apply(this, arguments);
 	};
 
 	var actionsInit = Actions.prototype.init;

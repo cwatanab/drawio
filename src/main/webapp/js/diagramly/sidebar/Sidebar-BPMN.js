@@ -10,7 +10,11 @@
 		var gn = 'mxgraph.bpmn2';
 		var r = 400;
 		var sb = this;
-		
+
+		this.setPickerShapes('bpmn2', ['Generic Task', 'Exclusive', 'None Start', 'End',
+			'Parallel', 'User', 'Service', 'Sub-Process, Collapsed', 'Message Intermediate, Catching',
+			'Timer Intermediate, Catching', 'Inclusive', 'Message End', 'Data Object', 'Data Store',
+			'Text Annotation', 'Send', 'Receive', 'Manual', 'Script', 'Business Rule', 'Call Activity']);
 		this.setCurrentSearchEntryLibrary('bpmn2', 'bpmn2General');
 		this.addBPMN2GeneralPalette(gn, r, sb);
 		this.setCurrentSearchEntryLibrary('bpmn2', 'bpmn2Tasks');

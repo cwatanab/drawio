@@ -91,20 +91,6 @@ Draw.loadPlugin(function(editorUi)
 			}
 		}
 		
-		function createOverlay(desc)
-		{
-			var overlay = new mxCellOverlay(desc.image || graph.warningImage,
-				desc.tooltip, desc.align, desc.valign, desc.offset);
-
-			// Installs a handler for clicks on the overlay
-			overlay.addListener(mxEvent.CLICK, function(sender, evt)
-			{
-				editorUi.alert(desc.tooltip);
-			});
-			
-			return overlay;
-		};
-		
 		function parseResponse(xml)
 		{
 			var doc = editorUi.updateDiagram(xml);

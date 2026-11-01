@@ -65,7 +65,26 @@ ElkLayoutBindings.run = function(editorUi, algorithm, options, runOptions, done)
 		parent = sel;
 	}
 
-	var layout = new ElkLayout(graph, algorithm, options, runOptions);
+	// Limits the options like the layouts of Graph.createLayouts. Checks
+	// the function as this file can be newer than app.min.js after a release.
+	if (typeof Graph.sanitizeElkLayoutOptions === 'function')
+	{
+		options = Graph.sanitizeElkLayoutOptions(options, algorithm);
+	}
+
+	// Ignores ties like the layouts of Graph.createLayouts. Roots scope the
+	// run to their connected components, which have no ties. Checks the
+	// function as this file can be newer than app.min.js after a release.
+	var layoutOptions = runOptions;
+
+	if (typeof graph.createTieFilter === 'function' && (runOptions == null ||
+		(runOptions.rootCellIds == null && runOptions.rootCellId == null)))
+	{
+		layoutOptions = Object.assign({}, runOptions);
+		layoutOptions.cellFilter = graph.createTieFilter(layoutOptions.cellFilter);
+	}
+
+	var layout = new ElkLayout(graph, algorithm, options, layoutOptions);
 	var spinner = editorUi.spinner;
 
 	// Records the run for Arrange > Layout > Run Last Layout as a
@@ -260,12 +279,20 @@ ElkLayoutBindings.DIALOG_FIELDS = {
  * Reads previous values from session settings; writes them back on Apply.
  * baseOptions are merged in last so the menu's direction preset can't be
  * overridden through the dialog.
+ *
+ * The optional `edit` object {cell, settings} opens the dialog for the
+ * layout of the layout container `cell` (see EditorUi.editContainerLayout):
+ * it shows `settings` (see getDialogSettings) instead of the session
+ * settings, which it neither reads nor writes, has no selection-as-root
+ * option, and stores the options of the dialog when it first opened in
+ * `edit.initial` as {layoutOptions, runOptions}. onApply then also gets
+ * the algorithm, which the Method dropdown can change.
  */
-ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dialogTitle, onApply, onCancel)
+ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dialogTitle, onApply, onCancel, edit)
 {
 	ElkLayout._loadSettings();
 	var fields = ElkLayout.DIALOG_FIELDS[algorithm] || [];
-	var saved = ElkLayout.SETTINGS[algorithm] || {};
+	var saved = (edit != null) ? edit.settings : (ElkLayout.SETTINGS[algorithm] || {});
 	var graph = editorUi.editor.graph;
 
 	// Selection-as-root(s): collect every selected vertex up to the algorithm's
@@ -277,11 +304,11 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 	var sel = graph.getSelectionCells();
 	var maxRoots = ElkLayout.MAX_ROOTS[algorithm] || 0;
 	var rootCandidates = [];
-	var layoutContainers = (typeof onApply === 'function') ?
-		[] : editorUi.getSelectedLayoutContainers();
+	var layoutContainers = (edit != null) ? [edit.cell] : ((typeof onApply === 'function') ?
+		[] : editorUi.getSelectedLayoutContainers());
 	var layoutContainer = (layoutContainers.length > 0) ? layoutContainers[0] : null;
 
-	if (maxRoots > 0 && (typeof onApply === 'function' || layoutContainer == null))
+	if (maxRoots > 0 && edit == null && (typeof onApply === 'function' || layoutContainer == null))
 	{
 		for (var ci = 0; ci < sel.length && rootCandidates.length < maxRoots; ci++)
 		{
@@ -352,7 +379,7 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 
 			editorUi.hideDialog();
 			ElkLayout.runWithDialog(editorUi, newAlgo, baseOptions,
-				dialogTitle, onApply, onCancel);
+				dialogTitle, onApply, onCancel, edit);
 		});
 	}
 
@@ -609,7 +636,8 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 	div.appendChild(edgeSection);
 	div.appendChild(toggleSection);
 
-	var applyFn = function()
+	// Returns the options of the dialog as {layoutOptions, runOptions, saved}
+	var collect = function()
 	{
 		var layoutOptions = {};
 		var runOptionValues = {};
@@ -711,9 +739,6 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 			newSaved.__edgeStyle = edgeStyleMode;
 		}
 
-		ElkLayout.SETTINGS[algorithm] = newSaved;
-		ElkLayout._saveSettings();
-
 		var runOptions = {
 			applierOptions: {resizeParent: !!resizeCb.checked},
 			edgeStyleMode: edgeStyleMode,
@@ -738,34 +763,60 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 			runOptions.sharedStems = false;
 		}
 
+		return {layoutOptions: layoutOptions, runOptions: runOptions, saved: newSaved};
+	};
+
+	// The baseline of the changes of the edited layout (kept when Reset
+	// or the Method dropdown reopen the dialog)
+	if (edit != null && edit.initial == null)
+	{
+		edit.initial = collect();
+	}
+
+	var applyFn = function()
+	{
+		var result = collect();
+
+		if (edit == null)
+		{
+			ElkLayout.SETTINGS[algorithm] = result.saved;
+			ElkLayout._saveSettings();
+		}
+
 		if (typeof onApply === 'function')
 		{
-			onApply(layoutOptions, runOptions);
+			onApply(result.layoutOptions, result.runOptions, algorithm);
 		}
 		else
 		{
-			ElkLayout.run(editorUi, algorithm, layoutOptions, runOptions);
+			ElkLayout.run(editorUi, algorithm, result.layoutOptions, result.runOptions);
 		}
 	};
 
 	// Reset clears the saved settings for this algorithm and re-opens the
 	// dialog so every field shows its default. Only meaningful when the
 	// settings actually persist — without localStorage, the dialog already
-	// starts at defaults each time, so the button would be a no-op.
+	// starts at defaults each time, so the button would be a no-op. For an
+	// edited layout, it shows the defaults and keeps the saved settings.
 	var resetBtn = null;
 
-	if (isLocalStorage)
+	if (isLocalStorage || edit != null)
 	{
 		resetBtn = mxUtils.button(mxResources.get('reset'), function()
 		{
-			delete ElkLayout.SETTINGS[algorithm];
-			ElkLayout._saveSettings();
+			if (edit == null)
+			{
+				delete ElkLayout.SETTINGS[algorithm];
+				ElkLayout._saveSettings();
+			}
+
 			editorUi.hideDialog();
 			// Re-arm the same onApply/onCancel — without this, a Reset from
 			// the custom layout dialog's Add flow would drop back into the
 			// default "run immediately" mode and skip the JSON append step.
 			ElkLayout.runWithDialog(editorUi, algorithm, baseOptions, dialogTitle,
-				onApply, onCancel);
+				onApply, onCancel, (edit != null) ? {cell: edit.cell, settings: {},
+				initial: edit.initial} : null);
 		});
 		resetBtn.className = 'geBtn';
 	}
@@ -774,6 +825,49 @@ ElkLayoutBindings.runWithDialog = function(editorUi, algorithm, baseOptions, dia
 		mxResources.get('apply'), ElkLayout.HELP_URL +
 		(ElkLayout.HELP_ANCHORS[algorithm] || ''), resetBtn);
 	editorUi.showDialog(dlg.container, 360, null, true, true);
+};
+
+/**
+ * Returns the settings of the dialog of the given algorithm (see
+ * runWithDialog) that show the given config of a layout (see
+ * Graph.elkConfigToOptions). Keys without a field keep their values when
+ * the dialog writes the changed options back (see
+ * EditorUi.editContainerLayout).
+ */
+ElkLayoutBindings.getDialogSettings = function(algorithm, config)
+{
+	var fields = ElkLayout.DIALOG_FIELDS[algorithm] || [];
+	var result = {};
+
+	config = (config != null) ? config : {};
+
+	for (var i = 0; i < fields.length; i++)
+	{
+		var value = config[fields[i].key];
+
+		if (value != null && typeof value !== 'object')
+		{
+			result[fields[i].key] = String(value);
+		}
+	}
+
+	result.__resize = config.resizeNodes === true;
+	result.__corners = (typeof config.corners === 'string') ? config.corners : 'keep';
+	result.__preserveOrigin = config.preserveOrigin === true;
+	result.__sharedStems = config.sharedStems !== false;
+
+	if (algorithm === 'layered')
+	{
+		result.__connector = (config['elk.edgeRouting'] === 'POLYLINE') ?
+			'polyline' : 'orthogonal';
+	}
+	else
+	{
+		result.__edgeStyle = (typeof config.edgeStyle === 'string') ?
+			config.edgeStyle : 'auto';
+	}
+
+	return result;
 };
 
 // ─── Editor hook: release libavoid auto-routing on routed edges ─────
@@ -852,7 +946,27 @@ var installElkNonTreeRouting = function(cls)
 					graph.getModel().contains(parent) &&
 					graph.layoutManager != null)
 				{
-					graph.layoutManager.executeLayout(parent, false);
+					var kick = function()
+					{
+						graph.layoutManager.executeLayout(parent, false);
+					};
+
+					// The layout manager skips containers above the size limits
+					// after edits (see Graph.isLiveLayoutLimited), and only an
+					// explicit run lays them out, so the kick upgrades the routes
+					// of that run without the limits, like the explicit run. Other
+					// containers keep the limits for their ancestors. Checked as
+					// the core can be an older release.
+					if (typeof graph.executeWithoutLayoutLimits === 'function' &&
+						typeof graph.isLiveLayoutLimited === 'function' &&
+						graph.isLiveLayoutLimited(parent, graph.layoutManager.getLayout(parent)))
+					{
+						graph.executeWithoutLayoutLimits(kick);
+					}
+					else
+					{
+						kick();
+					}
 				}
 			});
 		}

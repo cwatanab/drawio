@@ -48,6 +48,11 @@ window.NOTIFICATIONS_URL = window.NOTIFICATIONS_URL || ((/.*\.draw\.io$/.test(wi
 	window.DRAWIO_SERVER_URL + 'notifications' : null);
 window.RT_WEBSOCKET_URL = window.RT_WEBSOCKET_URL || ('wss://' + ((window.location.hostname == 'test.draw.io') ?
 	'app.diagrams.net' : window.location.hostname) + '/rt');
+// AI diagram generation (generate/v3 worker), on the own origin of the hosts
+// that route it and on www.draw.io for all others
+window.GENERATE_URL = window.GENERATE_URL || (((/^(www|ac|aj)\.draw\.io$/.test(window.location.hostname) ||
+	window.location.hostname == 'app.diagrams.net') ? window.location.origin :
+	'https://www.draw.io') + '/generate/v3');
 // Maximum AI prompt length on the Atlassian deployments (applied to
 // Editor.maxPublicPromptLength on ac.draw.io / aj.draw.io / Forge CDN hosts,
 // 0 disables the limit); must not exceed the generate/v3 worker's

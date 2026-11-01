@@ -1688,36 +1688,34 @@ mxCellRenderer.registerShape(mxShapeElectricalMux.prototype.cst.SHAPE_MUX, mxSha
 mxShapeElectricalMux.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
-	var pinRange = (h - 16) / h;
 	var selectorPins = Math.min(parseInt(mxUtils.getValue(this.style, 'selectorPins', '1')), this.maxSelectorPins);
 	var operation = mxUtils.getValue(this.style, 'operation', 'mux');
-	
+
 	var numInputs = 1;
 	var numOutputs = 1;
-	
+
 	if (operation == 'mux')
 	{
 		numInputs = Math.pow(2, selectorPins);
-		var spacing = pinRange / numInputs;
 	}
 	else
 	{
 		numOutputs = Math.pow(2, selectorPins);
-		var spacing = pinRange / numOutputs;
 	}
-	
-	var currH = spacing * 0.5;
-	
+
+	// Pin i of n is painted at 3 + (h - 16) * (i + 0.5) / n and selector pin i
+	// at 10 + (w - 20) * (i + 0.5) / n: relative points with the fixed margins
+	// as offsets, so edges follow a resize
 	if (numInputs == 1)
 	{
-		constr.push(new mxConnectionConstraint(new mxPoint(0, 0.5 * (h - 10) / h), false, 0, 0));
+		constr.push(new mxConnectionConstraint(new mxPoint(0, 0.5), false, null, 0, -5));
 	}
 	else
 	{
 		for (var i = 0; i < numInputs; i++)
 		{
-			constr.push(new mxConnectionConstraint(new mxPoint(0, currH), false, null, 0, 3));
-			currH = currH + spacing;
+			var f = (i + 0.5) / numInputs;
+			constr.push(new mxConnectionConstraint(new mxPoint(0, f), false, null, 0, 3 - 16 * f));
 		}
 	}
 
@@ -1729,18 +1727,15 @@ mxShapeElectricalMux.prototype.getConstraints = function(style, w, h)
 	{
 		for (var i = 0; i < numOutputs; i++)
 		{
-			constr.push(new mxConnectionConstraint(new mxPoint(1, currH), false, null, 0, 3));
-			currH = currH + spacing;
+			var f = (i + 0.5) / numOutputs;
+			constr.push(new mxConnectionConstraint(new mxPoint(1, f), false, null, 0, 3 - 16 * f));
 		}
 	}
 
-	var spacing = (w - 20) / (w * selectorPins);
-	var currW = spacing * 0.5;
-	
 	for (var i = 0; i < selectorPins; i++)
 	{
-		constr.push(new mxConnectionConstraint(new mxPoint(currW, 1), false, null, 10, 0));
-		currW = currW + spacing;
+		var f = (i + 0.5) / selectorPins;
+		constr.push(new mxConnectionConstraint(new mxPoint(f, 1), false, null, 10 - 20 * f, 0));
 	}
 
 	return (constr);

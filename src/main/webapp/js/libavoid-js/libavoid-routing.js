@@ -1202,6 +1202,54 @@
 		// libavoid found NO route for (isFallbackRoute), in batch order.
 		function solveWith(batch, clearance, obstacles)
 		{
+			var result = {routes: Object.create(null), points: [], failed: []};
+			var bounds = Object.create(null);
+			var shapes = [];
+			var routable = [];
+			var i;
+
+			for (i = 0; i < obstacles.length; i++)
+			{
+				var v = obstacles[i];
+
+				if (v != null && v.id != null && v.w > 0 && v.h > 0)
+				{
+					bounds[v.id] = v;
+					shapes.push(v);
+				}
+			}
+
+			for (i = 0; i < batch.length; i++)
+			{
+				var e = batch[i];
+
+				// An end is either a known vertex or a dangling free point
+				// (e.sourcePoint / e.targetPoint, absolute coords) for an
+				// unconnected endpoint. Self-loops are out of scope: obstacle
+				// avoidance between identical endpoints is meaningless and the
+				// orthogonal router degenerates to a buffer-sized hook beside the
+				// shape. Skipping leaves the caller's loop styling and waypoints
+				// untouched (an edge with no route entry is never written), e.g.
+				// draw.io's inner-loop-waypoint self-loops.
+				if (e != null && (bounds[e.source] != null || e.sourcePoint != null) &&
+					(bounds[e.target] != null || e.targetPoint != null) &&
+					(e.source == null || e.source !== e.target))
+				{
+					routable.push(e);
+				}
+			}
+
+			// No router without connectors: a ShapeRef only queues its ShapeAdd,
+			// it becomes one of the obstacles that ~Router deletes in
+			// processTransaction, so a router deleted before a transaction
+			// leaked every shape with its vertices and pins (eg. a batch whose
+			// terminals are all on edges). The leak moved the next solves'
+			// allocations, and libavoid breaks ties by address.
+			if (routable.length === 0)
+			{
+				return result;
+			}
+
 			var router = new Avoid.Router(Avoid.RouterFlag.OrthogonalRouting.value);
 
 			try { router.setRoutingParameter(Avoid.RoutingParameter.shapeBufferDistance, clearance); } catch (e) {}
@@ -1213,22 +1261,14 @@
 				try { router.setRoutingOption(Avoid.RoutingOption.penaliseOrthogonalSharedPathsAtConnEnds, true); } catch (e) {}
 			}
 
-			var bounds = Object.create(null);
 			var shapeRefs = Object.create(null);
 			var pinClasses = Object.create(null);
 			var pinClass = 0;
-			var i;
 
-			for (i = 0; i < obstacles.length; i++)
+			for (i = 0; i < shapes.length; i++)
 			{
-				var v = obstacles[i];
+				v = shapes[i];
 
-				if (v == null || v.id == null || !(v.w > 0) || !(v.h > 0))
-				{
-					continue;
-				}
-
-				bounds[v.id] = v;
 				// Point/Rectangle are embind value wrappers that COPY into the
 				// ShapeRef and are NOT freed by router.delete(); free the temporaries.
 				var rp1 = new Avoid.Point(v.x, v.y);
@@ -1332,37 +1372,11 @@
 
 			var conns = [];
 
-			for (i = 0; i < batch.length; i++)
+			for (i = 0; i < routable.length; i++)
 			{
-				var e = batch[i];
-
-				if (e == null)
-				{
-					continue;
-				}
-
+				e = routable[i];
 				var sb = bounds[e.source];
 				var tb = bounds[e.target];
-
-				// An end is either a known vertex (sb/tb) or a dangling free point
-				// (e.sourcePoint / e.targetPoint, absolute coords) for an unconnected
-				// endpoint. Skip only when an end is neither.
-				if ((sb == null && e.sourcePoint == null) ||
-					(tb == null && e.targetPoint == null))
-				{
-					continue;
-				}
-
-				// Self-loops are out of scope: obstacle avoidance between identical
-				// endpoints is meaningless and the orthogonal router degenerates to
-				// a buffer-sized hook beside the shape. Skipping leaves the caller's
-				// loop styling and waypoints untouched (an edge with no route entry
-				// is never written), e.g. draw.io's inner-loop-waypoint self-loops.
-				if (e.source != null && e.source === e.target)
-				{
-					continue;
-				}
-
 				var sPins = (sb != null) ? AvoidRouting.endPins(sb,
 					e.sourceConstraint, e.sourceSides, e.sourcePoints) : null;
 				var tPins = (tb != null) ? AvoidRouting.endPins(tb,
@@ -1427,14 +1441,6 @@
 					sourcePins: absolutePins(sb, sPins),
 					targetPins: absolutePins(tb, tPins),
 					sourceEnd: [e.source, sb, sPins, e.sourcePoint]});
-			}
-
-			var result = {routes: Object.create(null), points: [], failed: []};
-
-			if (conns.length === 0)
-			{
-				router.delete();
-				return result;
 			}
 
 			router.processTransaction();

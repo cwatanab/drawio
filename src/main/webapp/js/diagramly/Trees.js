@@ -268,15 +268,16 @@
 			return (cell != null) ? model.getParent(cell) : null;
 		};
 
-		// True if the given tree container runs a layered (flow) layout:
-		// the JSON childLayout decodes to elkLayered, or the legacy
-		// flowLayout string. Flow containers carry containerType=tree for
-		// the subtree delete/move semantics only — a flowchart has no
-		// siblings or parents to insert, so the hover arrows add a child
+		// True if the hover arrows in the given tree container add a child
 		// connected from the hovered cell instead of following the tree
-		// rules (a perpendicular arrow used to add a sibling, ie. a second
+		// rules: the container runs a layered (flow) layout (the JSON
+		// childLayout decodes to elkLayered, or the legacy flowLayout string)
+		// or a balloon tree, where the arrows have no direction. Flow
+		// containers carry containerType=tree for the subtree delete/move
+		// semantics only — a flowchart has no siblings or parents to insert
+		// (a perpendicular arrow used to add a sibling, ie. a second
 		// successor of the previous shape).
-		function isFlowContainer(container)
+		function isChildArrowContainer(container)
 		{
 			if (container != null)
 			{
@@ -293,7 +294,8 @@
 					var list = Graph.decodeChildLayout(value);
 
 					return list != null && list.length > 0 && list[0] != null &&
-						list[0].layout == 'elkLayered';
+						(list[0].layout == 'elkLayered' ||
+						list[0].layout == 'BalloonTreeLayout');
 				}
 				catch (e)
 				{
@@ -789,6 +791,7 @@
 								var clone = this.cloneCell(edges[0]);
 								this.addEdge(clone, graph.getDefaultParent(),
 									this.model.getTerminal(edges[0], true), result[i]);
+								removeTerminalPoints(clone);
 							}
 						}
 					}
@@ -808,15 +811,22 @@
 		{
 			var result = null;
 
-			// Adds collapsed subtrees
+			// Adds collapsed subtrees, or the hidden cells below collapsed cells
+			// in layout containers, whose layouts ignore hidden cells
 			var allCells = [];
 
 			for (var i = 0; i < cells.length; i++)
 			{
-				if (((isTreeMoving(cells[i]) || isTreeVertex(cells[i])) &&
-					!hasLayoutParent(cells[i])) && this.isCellCollapsed(cells[i])	)
+				if ((isTreeMoving(cells[i]) || isTreeVertex(cells[i])) &&
+					this.isCellCollapsed(cells[i]))
 				{
-					allCells = allCells.concat(this.getSubtree(cells[i]));
+					var subtree = (hasLayoutParent(cells[i])) ?
+						getTreeCells(cells[i], true) : this.getSubtree(cells[i]);
+
+					for (var j = 0; j < subtree.length; j++)
+					{
+						allCells.push(subtree[j]);
+					}
 				}
 				else
 				{
@@ -913,6 +923,7 @@
 										
 										var clone = this.cloneCell(edges[0]);
 										this.addEdge(clone, graph.getDefaultParent(), temp, result[i]);
+										removeTerminalPoints(clone);
 									}
 								}
 							}
@@ -993,8 +1004,22 @@
 						if (abs != null && abs.length > 0)
 						{
 							var pt = abs[abs.length - 1];
-							
-							if (pt != null)
+							var prev = (abs.length > 1) ? abs[abs.length - 2] : null;
+
+							// A connector that ends on a corner (eg. the bottom corners of a
+							// branch in a mindmap) enters in the direction of its last
+							// segment, as rounding puts its end on one or the other side
+							var corner = pt != null && prev != null && (prev.x != pt.x || prev.y != pt.y) &&
+								Math.abs(Math.abs(pt.x - state.getCenterX()) - state.width / 2) < 1 &&
+								Math.abs(Math.abs(pt.y - state.getCenterY()) - state.height / 2) < 1;
+
+							if (corner)
+							{
+								return (Math.abs(pt.x - prev.x) >= Math.abs(pt.y - prev.y)) ?
+									((pt.x > prev.x) ? mxConstants.DIRECTION_EAST : mxConstants.DIRECTION_WEST) :
+									((pt.y > prev.y) ? mxConstants.DIRECTION_SOUTH : mxConstants.DIRECTION_NORTH);
+							}
+							else if (pt != null)
 							{
 								if (pt.y == state.y && Math.abs(pt.x - state.getCenterX()) < state.width / 2)
 								{
@@ -1056,6 +1081,27 @@
 			}
 
 			return clones;
+		};
+
+		/**
+		 * Removes the terminal points of the connected ends of the given
+		 * edge, cloned in the current edit. mxGraph.cloneCells sets them at
+		 * the old terminal of ends whose terminal is not cloned, and an end
+		 * that is disconnected later (eg. by the undo of a collaborator)
+		 * would dangle there.
+		 */
+		function removeTerminalPoints(edge)
+		{
+			if (edge.geometry != null)
+			{
+				for (var i = 0; i < 2; i++)
+				{
+					if (graph.model.getTerminal(edge, i == 0) != null)
+					{
+						edge.geometry.setTerminalPoint(null, i == 0);
+					}
+				}
+			}
 		};
 
 		function addSibling(cell, after, targetCell)
@@ -1192,6 +1238,8 @@
 					}
 				}
 				
+				removeTerminalPoints(clones[0]);
+
 				return graph.addCells(clones, parent);
 			}
 			finally
@@ -1265,6 +1313,8 @@
 				
 				graph.moveCells(subtree, dx, dy);
 	
+				removeTerminalPoints(clones[0]);
+
 				return graph.addCells(clones, parent);
 			}
 			finally
@@ -1354,6 +1404,8 @@
 						pgeo.y + spacing;
 				}
 	
+				removeTerminalPoints(clones[0]);
+
 				return graph.addCells(clones, parent);
 			}
 			finally
@@ -1476,18 +1528,28 @@
 					else if (isTreeVertex(cell))
 					{
 						var cells = null;
-		
-						if (graph.getIncomingTreeEdges(cell).length > 0)
+
+						// Ctrl+Shift+Enter adds a child, Ctrl+Alt+Enter a parent, Ctrl+Enter a
+						// sibling after and Shift+Enter a sibling before, while Tab moves the
+						// focus and Enter edits the label
+						if (evt.which == 13 && graph.getIncomingTreeEdges(cell).length > 0)
 						{
-							if (evt.which == 9) // Tab adds child
+							var control = mxEvent.isControlDown(evt) ||
+								(mxClient.IS_MAC && mxEvent.isMetaDown(evt));
+							var shift = mxEvent.isShiftDown(evt);
+							var alt = mxEvent.isAltDown(evt);
+
+							if (control && shift && !alt)
 							{
-								cells = (mxEvent.isShiftDown(evt)) ?
-									addParent(cell) :
-									addChild(cell);
+								cells = addChild(cell);
 							}
-							else if (evt.which == 13) // Enter adds sibling
+							else if (control && alt && !shift)
 							{
-								cells = addSibling(cell, !mxEvent.isShiftDown(evt));
+								cells = addParent(cell);
+							}
+							else if (control != shift && !alt)
+							{
+								cells = addSibling(cell, control);
 							}
 						}
 						
@@ -1502,12 +1564,15 @@
 								graph.setSelectionCell(cells[cells.length - 1]);
 							}
 							
+							// Edits the new cell
+							var newCell = graph.getSelectionCell();
+
 							if (ui.hoverIcons != null)
 							{
-								ui.hoverIcons.update(graph.view.getState(cell));
+								ui.hoverIcons.update(graph.view.getState(newCell));
 							}
 							
-							graph.startEditingAtCell(cell);
+							graph.startEditingAtCell(newCell);
 							mxEvent.consume(evt);
 						}
 						else if (evt.keyCode == 37) // left
@@ -1558,7 +1623,7 @@
 				var result = null;
 
 				if (dir == direction || edges.length == 0 ||
-					isFlowContainer(model.getParent(source)))
+					isChildArrowContainer(model.getParent(source)))
 				{
 					result = addChild(source, direction, targetCell);
 				}
@@ -1589,35 +1654,97 @@
 			}
 		};
 		
-		graph.getSubtree = function(initialCell)
+		/**
+		 * Returns the given cell with the vertices and tree edges below it, or
+		 * only with the hidden ones (see Graph.foldTreeCell) if hidden is true.
+		 */
+		function getTreeCells(initialCell, hidden)
 		{
 			var cells = [initialCell];
-			
-			if ((isTreeMoving(initialCell) || isTreeVertex(initialCell)) &&
-				!hasLayoutParent(initialCell))
+			var seen = new mxDictionary();
+			seen.put(initialCell, true);
+
+			// Gets the subtree from cell downwards
+			traverseTree(initialCell, function(vertex, edge)
 			{
-				// Gets the subtree from cell downwards
-				graph.traverse(initialCell, true, function(vertex, edge)
+				var treeEdge = edge != null && graph.isTreeEdge(edge);
+				var result = (edge == null || treeEdge) && (!hidden ||
+					vertex == initialCell || !model.isVisible(vertex));
+
+				if (result && edge != null && !seen.get(edge))
 				{
-					var treeEdge = edge != null && graph.isTreeEdge(edge);
-					
-					// LATER: Use dictionary to avoid duplicates
-					if (treeEdge && mxUtils.indexOf(cells, edge) < 0)
-					{
-						cells.push(edge);
-					}
-	
-					if ((edge == null || treeEdge) &&
-						mxUtils.indexOf(cells, vertex) < 0)
-					{
-						cells.push(vertex);
-					}
-					
-					return edge == null || treeEdge;
-				});
-			}
-	
+					seen.put(edge, true);
+					cells.push(edge);
+				}
+
+				if (result && !seen.get(vertex))
+				{
+					seen.put(vertex, true);
+					cells.push(vertex);
+				}
+
+				return result;
+			});
+
 			return cells;
+		};
+
+		/**
+		 * Calls func for the given vertex and for the targets of its outgoing
+		 * edges in the order of graph.traverse, each edge once, and goes on
+		 * from each vertex for which func does not return false. Walks without
+		 * recursion, as hidden subtrees of collapsed cells can be deep.
+		 */
+		function traverseTree(initialCell, func)
+		{
+			var visited = new mxDictionary();
+			var stack = [];
+
+			var visit = function(vertex, edge)
+			{
+				if (vertex != null && (edge == null || !visited.get(edge)))
+				{
+					if (edge != null)
+					{
+						visited.put(edge, true);
+					}
+
+					var result = func(vertex, edge);
+
+					if (result == null || result)
+					{
+						stack.push({vertex: vertex, index: 0,
+							count: model.getEdgeCount(vertex)});
+					}
+				}
+			};
+
+			visit(initialCell, null);
+
+			while (stack.length > 0)
+			{
+				var frame = stack[stack.length - 1];
+
+				if (frame.index < frame.count)
+				{
+					var edge = model.getEdgeAt(frame.vertex, frame.index++);
+
+					if (model.getTerminal(edge, true) == frame.vertex)
+					{
+						visit(model.getTerminal(edge, false), edge);
+					}
+				}
+				else
+				{
+					stack.pop();
+				}
+			}
+		};
+
+		graph.getSubtree = function(initialCell)
+		{
+			return ((isTreeMoving(initialCell) || isTreeVertex(initialCell)) &&
+				!hasLayoutParent(initialCell)) ? getTreeCells(initialCell) : [initialCell];
 		};
 		
 		/**
@@ -1677,6 +1804,12 @@
 			var treeContainerStyle = 'swimlane;startSize=20;horizontal=1;' +
 				'containerType=tree;transparentBounds=1;groupPadding=20;';
 
+			// The mindmap is a live layout container (see MindmapLayout), its
+			// cells are authored at the positions of the layout so that a drop
+			// moves nothing
+			var mindmapLayout = 'childLayout=' + Graph.encodeChildLayout([{layout: 'MindmapLayout',
+				config: {levelDistance: 40, nodeDistance: 10}}]) + ';';
+
 			return result.concat([
 				this.addEntry('tree container', function()
 				{
@@ -1709,15 +1842,15 @@
 				this.addEntry('tree mindmap mindmaps central idea branch topic', function()
 				{
 					var mindmap = new mxCell('Mindmap', new mxGeometry(0, 0, 0, 0),
-						treeContainerStyle);
+						treeContainerStyle + mindmapLayout);
 					mindmap.vertex = true;
 					
-					var cell = new mxCell('Central Idea', new mxGeometry(160, 60, 100, 40),
+					var cell = new mxCell('Central Idea', new mxGeometry(140, 48, 100, 40),
 				    	'ellipse;whiteSpace=wrap;html=1;align=center;' +
 				    	'treeFolding=1;treeMoving=1;' + mmEdgeStyle);
 			    	cell.vertex = true;
 			    	
-			    	var cell2 = new mxCell('Topic', new mxGeometry(320, 40, 80, 20),
+			    	var cell2 = new mxCell('Topic', new mxGeometry(280, 40, 80, 20),
 				    	'whiteSpace=wrap;html=1;rounded=1;arcSize=50;align=center;verticalAlign=middle;' +
 		    			'strokeWidth=1;autosize=1;spacing=4;treeFolding=1;treeMoving=1;' + mmEdgeStyle);
 			    	cell2.vertex = true;
@@ -1731,7 +1864,7 @@
 					cell.insertEdge(edge, true);
 					cell2.insertEdge(edge, false);
 					
-			    	var cell3 = new mxCell('Branch', new mxGeometry(320, 80, 72, 26),
+			    	var cell3 = new mxCell('Branch', new mxGeometry(280, 70, 72, 26),
 			    		'whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];' +
 			    		'fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;' +
 			    		'snapToPoint=1;autosize=1;treeFolding=1;treeMoving=1;' + mmEdgeStyle);
@@ -1756,7 +1889,7 @@
 					cell.insertEdge(edge3, true);
 					cell4.insertEdge(edge3, false);
 					
-			    	var cell5 = new mxCell('Branch', new mxGeometry(20, 80, 72, 26),
+			    	var cell5 = new mxCell('Branch', new mxGeometry(28, 70, 72, 26),
 			    		'whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];' +
 			    		'fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;' +
 			    		'snapToPoint=1;autosize=1;treeFolding=1;treeMoving=1;' + mmEdgeStyle);
@@ -1780,7 +1913,7 @@
 					mindmap.insert(cell5);
 					
 					// Thumbnail size = derived bounds (children bbox + padding + title)
-					return sb.createVertexTemplateFromCells([mindmap], 420, 126, mindmap.value);
+					return sb.createVertexTemplateFromCells([mindmap], 380, 116, mindmap.value);
 				}),
 				this.addEntry('tree mindmap mindmaps central idea', function()
 				{

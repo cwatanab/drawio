@@ -14,7 +14,11 @@
 		var gn = 'mxgraph.flowchart';
 		var dt = '';
 		this.setCurrentSearchEntryLibrary('flowchart');
-		
+		this.setPickerShapes('flowchart', ['Process', 'Decision', 'Terminator', 'Data',
+			'Document', 'Predefined Process', 'Database', 'Manual Input', 'Preparation',
+			'On-Page Reference', 'Off-Page Reference', 'Delay', 'Display', 'Multi-Document',
+			'Stored Data', 'Manual Operation', 'Internal Storage', 'Loop Limit', 'Annotation']);
+
 		this.addPaletteFunctions('flowchart', mxResources.get('flowchart'), false,
 		[
 			this.createVertexTemplateEntry(s + 'annotation_1;align=left;pointerEvents=1;', w * 0.5, h, '', 'Annotation', null, null, this.getTagsForStencil(gn, 'annotation_1', dt).join(' ')),

@@ -762,6 +762,7 @@ GraphViewer.prototype.init = function(container, xmlNode, graphConfig)
 				}
 
 				this.addClickHandler(this.graph);
+				this.installScreenReaderSupport();
 				this.graph.initialViewState = {
 					translate: this.graph.view.translate.clone(),
 					scale: this.graph.view.scale
@@ -890,6 +891,90 @@ GraphViewer.prototype.init = function(container, xmlNode, graphConfig)
 			}
 		}
 	}
+};
+
+/**
+ * Makes the diagram a figure for screen readers, named after the Alt Text of
+ * its page (see getDiagramAltText), or else after its title and page with its
+ * numbers of shapes and connectors, which are counted after each change, eg.
+ * of the page, and adds the button for its text outline (see
+ * Graph.addTextOutlineButton). A role or name that the page gave the
+ * container is kept.
+ */
+GraphViewer.prototype.installScreenReaderSupport = function()
+{
+	var graph = this.graph;
+	var container = graph.container;
+
+	if (container.getAttribute('role') == null)
+	{
+		container.setAttribute('role', 'figure');
+		container.setAttribute('aria-roledescription', mxResources.get('diagram'));
+	}
+
+	graph.view.getOverlayPane().setAttribute('aria-hidden', 'true');
+	graph.view.getDecoratorPane().setAttribute('aria-hidden', 'true');
+	graph.addTextOutlineButton();
+
+	if (container.getAttribute('aria-label') == null &&
+		container.getAttribute('aria-labelledby') == null)
+	{
+		var update = mxUtils.bind(this, function()
+		{
+			var alt = this.getDiagramAltText();
+			container.setAttribute('aria-label', (alt != null) ? alt :
+				graph.getDiagramDescription(this.getDiagramName(), graph.getCellCounts()));
+		});
+
+		graph.getModel().addListener(mxEvent.CHANGE, update);
+
+		// A new file is shown before its pages are known (see setXmlNode)
+		this.addListener('xmlNodeChanged', update);
+		update();
+	}
+};
+
+/**
+ * Returns the Alt Text of the shown page (see DiagramPage.getAlt), which names
+ * the diagram for screen readers, or null.
+ */
+GraphViewer.prototype.getDiagramAltText = function()
+{
+	var index = this.getShownPage();
+	var alt = (index >= 0) ? this.diagrams[index].getAttribute('alt') : null;
+
+	return (alt != null && mxUtils.trim(alt) != '') ? alt : null;
+};
+
+/**
+ * Returns the index of the shown page, which is the last page if the current
+ * page is past the last page, like in the renderer (see Editor.setGraphXml),
+ * or -1 if there are no pages.
+ */
+GraphViewer.prototype.getShownPage = function()
+{
+	return (this.diagrams != null && this.diagrams.length > 0) ?
+		Math.max(0, Math.min(this.diagrams.length - 1, this.currentPage || 0)) : -1;
+};
+
+/**
+ * Returns the name of the diagram for screen readers: its title and the
+ * name of the page if there are more than one, or Diagram.
+ */
+GraphViewer.prototype.getDiagramName = function()
+{
+	var name = (this.graphConfig.title != null) ? mxUtils.trim(String(this.graphConfig.title)) : '';
+
+	var index = this.getShownPage();
+
+	if (index >= 0 && this.diagrams.length > 1)
+	{
+		var page = this.diagrams[index].getAttribute('name') ||
+			mxResources.get('pageWithNumber', [index + 1], 'Page-' + (index + 1));
+		name = (name.length > 0) ? name + ', ' + page : page;
+	}
+
+	return (name.length > 0) ? name : mxResources.get('diagram');
 };
 
 /**
@@ -1122,6 +1207,11 @@ GraphViewer.prototype.setFileNode = function(xmlNode)
  */
 GraphViewer.prototype.updateGraphXml = function(xmlNode)
 {
+	// Passes the current page and the navigation to the parser like the first
+	// load, as page changes and other viewers change these global variables,
+	// eg. after setXmlNode (see getShownPage)
+	urlParams['page'] = this.currentPage;
+	urlParams['nav'] = (this.graphConfig.nav != false) ? '1' : '0';
 	this.setGraphXml(xmlNode);
 	this.fireEvent(new mxEventObject('graphChanged'));
 };
@@ -1510,8 +1600,12 @@ GraphViewer.prototype.crop = function()
  * the border, so there was twice the border on the right and bottom. The
  * size includes the CSS border and padding of a container with box-sizing
  * border-box, and the SVG root gets the size without them as its minimum
- * size, which is the area that scrollbars show. Sizes with a border of 0
- * are unchanged.
+ * size, which is the area that scrollbars show. The size is rounded up to
+ * whole pixels before the CSS border is added, as the CSS border is a
+ * fraction of a pixel at a device pixel ratio that is not an integer (eg.
+ * 0.67 px for 1 px at 150 %): rounding up the sum gave a client area of
+ * eg. 1226.67 px for an SVG root of 1227 px, which showed scrollbars.
+ * Sizes with a border of 0 are unchanged.
  */
 GraphViewer.prototype.installContainerSize = function()
 {
@@ -1532,8 +1626,8 @@ GraphViewer.prototype.installContainerSize = function()
 			var bs = (mxUtils.getCurrentStyle(this.container).boxSizing == 'border-box') ?
 				this.getBorderSizes() : new mxRectangle();
 			var min = this.minimumContainerSize || new mxRectangle();
-			var width = Math.max(0, bounds.x) + bounds.width + border;
-			var height = Math.max(0, bounds.y) + bounds.height + border;
+			var width = Math.ceil(Math.max(0, bounds.x) + bounds.width + border);
+			var height = Math.ceil(Math.max(0, bounds.y) + bounds.height + border);
 
 			this.doResizeContainer(Math.max(min.width, width + bs.x + bs.width),
 				Math.max(min.height, height + bs.y + bs.height));
@@ -1600,18 +1694,24 @@ GraphViewer.prototype.centerGraph = function(horizontal, vertical)
 };
 
 /**
- * Returns the size of the container in whole pixels without its CSS border
+ * Returns the size of the container without its CSS border
  * (eg. the transparent border of embeds) and scrollbars, which is the space
- * for the diagram and its border without scrollbars.
+ * for the diagram and its border without scrollbars. The width is rounded
+ * as the CSS border is a fraction of a pixel at a device pixel ratio that
+ * is not an integer (eg. 0.67 px for 1 px at 150 %), so that the rounded
+ * width of the diagram and its border (see updateOverflow) is not more
+ * than a width of eg. 1226.67 px only because of the fraction. The height
+ * is not rounded, as the bottom of the diagram in updateOverflow has no
+ * border, and a rounded height would hide up to 0.83 px of it.
  */
 GraphViewer.prototype.getAvailableSize = function()
 {
 	var container = this.graph.container;
 	var css = mxUtils.getCurrentStyle(container);
 
-	return new mxRectangle(0, 0, container.offsetWidth -
+	return new mxRectangle(0, 0, Math.round(container.offsetWidth -
 		mxUtils.parseCssNumber(css.borderLeftWidth) -
-		mxUtils.parseCssNumber(css.borderRightWidth),
+		mxUtils.parseCssNumber(css.borderRightWidth)),
 		container.offsetHeight -
 		mxUtils.parseCssNumber(css.borderTopWidth) -
 		mxUtils.parseCssNumber(css.borderBottomWidth));
@@ -1802,7 +1902,13 @@ GraphViewer.prototype.addToolbar = function()
 				window.clearTimeout(fadeThread2);
 				fadeThread2 = null;
 			}
-			
+
+			// The toolbar stays while it has the keyboard focus
+			if (mxUtils.isAncestorNode(toolbar, document.activeElement))
+			{
+				return;
+			}
+
 			fadeThread = window.setTimeout(mxUtils.bind(this, function()
 			{
 			 	mxUtils.setOpacity(toolbar, 0);
@@ -1866,7 +1972,29 @@ GraphViewer.prototype.addToolbar = function()
 				fadeIn(30);
 			}
 		}));
-		
+
+		// Shows the toolbar for Tab in the diagram, which can then move the focus
+		// into it, and keeps it while it has the focus. In the capture phase, as
+		// the text outline button stops the keys (see Graph.addTextOutlineButton)
+		this.graph.container.addEventListener('keydown', function(evt)
+		{
+			if (evt.keyCode == 9 /* Tab */ && toolbar.style.display == 'none')
+			{
+				fadeIn(30);
+				fadeOut();
+			}
+		}, true);
+
+		mxEvent.addListener(toolbar, 'focusin', function()
+		{
+			fadeIn(100);
+		});
+
+		mxEvent.addListener(toolbar, 'focusout', function()
+		{
+			fadeOut();
+		});
+
 		// Shows/hides toolbar for touch devices
 		this.graph.addTouchTapListener(function()
 		{
@@ -2344,14 +2472,18 @@ GraphViewer.prototype.createToolbarButton = function(fn, imgSrc, tip, enabled)
 		a.setAttribute('title', tip);
 	}
 	
+	// The title of the button is its name
 	var img = document.createElement('img');
+	img.setAttribute('alt', '');
 	img.setAttribute('border', '0');
 	img.setAttribute('src', imgSrc);
 	img.style.width = '18px';
 	img.className = 'geAdaptiveAsset';
-	
+
 	if (enabled == null || enabled)
 	{
+		Editor.initKeyboardButton(a);
+
 		mxEvent.addListener(a, 'mouseenter', function()
 		{
 			a.style.backgroundColor = 'light-dark(#dddddd,#333333)';
@@ -2384,6 +2516,10 @@ GraphViewer.prototype.disableButton = function(token, tooltip)
 	{
 		mxUtils.setOpacity(def.elem, 30);
 		mxEvent.removeListener(def.elem, 'click', def.handler);
+
+		// Disabled for screen readers (see Editor.initKeyboardButton) and Tab
+		def.elem.setAttribute('disabled', 'disabled');
+		def.elem.setAttribute('tabindex', '-1');
 		//Workaround to stop highlighting the disabled button
 		mxEvent.addListener(def.elem, 'mouseenter', function()
 		{
@@ -2674,6 +2810,12 @@ GraphViewer.prototype.showLocalLightbox = function(container)
 
 	var ui = new EditorUi(new Editor(true), document.createElement('div'), true);
 	this.addListener('darkModeChanged', updateDarkMode);
+
+	// Names the lightbox after the title of the viewer for screen readers
+	if (this.graphConfig.title != null && mxUtils.trim(String(this.graphConfig.title)).length > 0)
+	{
+		ui.diagramName = mxUtils.trim(String(this.graphConfig.title));
+	}
 	ui.editor.editBlankUrl = this.editBlankUrl;
 
 	// Waits for the UI language before showing the print dialog

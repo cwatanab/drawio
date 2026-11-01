@@ -325,8 +325,8 @@ Toolbar.prototype.createTextToolbar = function()
 	var tableMenu = this.addMenu(new Menu(mxUtils.bind(this, function(menu)
 	{
 		var elt = graph.getSelectedElement();
-		var cell = graph.getParentByNames(elt, ['TD', 'TH'], graph.cellEditor.text2);
-		var row = graph.getParentByName(elt, 'TR', graph.cellEditor.text2);
+		var cell = graph.getParentByNames(elt, ['TD', 'TH'], graph.cellEditor.textarea);
+		var row = graph.getParentByName(elt, 'TR', graph.cellEditor.textarea);
 
 		if (row == null)
     	{
@@ -334,7 +334,7 @@ Toolbar.prototype.createTextToolbar = function()
     	}
 		else
     	{
-			var table = graph.getParentByName(row, 'TABLE', graph.cellEditor.text2);
+			var table = graph.getParentByName(row, 'TABLE', graph.cellEditor.textarea);
 
 			elt = menu.addItem('', Editor.addColumnLeftImage, mxUtils.bind(this, function()
 			{
@@ -665,21 +665,28 @@ Toolbar.prototype.addItem = function(sprite, key, container, noListeners)
 			}
 		});
 
+		var updateTitle = function()
+		{
+			var tooltip = action.getTitle();
+
+			if (action.shortcut != null)
+			{
+				tooltip += ' (' + action.shortcut + ')';
+			}
+
+			elt.setAttribute('title', tooltip);
+		};
+
 		if (!noListeners)
 		{
-			this.editorUi.dependsOnLanguage(mxUtils.bind(this, function()
-			{
-				var tooltip = action.getTitle();
-			
-				if (action.shortcut != null)
-				{
-					tooltip += ' (' + action.shortcut + ')';
-				}
-				
-				elt.setAttribute('title', tooltip);
-			}));
-
+			this.editorUi.dependsOnLanguage(updateTitle);
 			action.addListener('stateChanged', stateChangedListener);
+		}
+		else
+		{
+			// Sets the title once for items without listeners, eg. in the format
+			// panel, as it is also the name of the button for screen readers
+			updateTitle();
 		}
 		
 		stateChangedListener();

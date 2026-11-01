@@ -36,18 +36,24 @@
  * keycodes or install a key event listener into the document element and print
  * the key codes of the respective events to the console.
  * 
+ * Keystrokes with modifier keys are bound by passing a combination of
+ * <mxKeyHandler.SHIFT>, <mxKeyHandler.CONTROL> and <mxKeyHandler.ALT> to
+ * <bindKey>. The following example binds Ctrl+Alt+D.
+ *
+ * (code)
+ * keyHandler.bindKey(68, function(evt)
+ * {
+ *   graph.selectCells(true, false);
+ * }, mxKeyHandler.CONTROL | mxKeyHandler.ALT);
+ * (end)
+ *
  * To support the Command key and the Control key on the Mac, the following
  * code can be used.
  *
  * (code)
- * keyHandler.getFunction = function(evt)
+ * keyHandler.isControlDown = function(evt)
  * {
- *   if (evt != null)
- *   {
- *     return (mxEvent.isControlDown(evt) || (mxClient.IS_MAC && evt.metaKey)) ? this.controlKeys[evt.keyCode] : this.normalKeys[evt.keyCode];
- *   }
- *   
- *   return null;
+ *   return mxEvent.isControlDown(evt) || (mxClient.IS_MAC && evt.metaKey);
  * };
  * (end)
  * 
@@ -75,6 +81,10 @@ function mxKeyHandler(graph, target)
 		this.shiftKeys = [];
 		this.controlKeys = [];
 		this.controlShiftKeys = [];
+		this.altKeys = [];
+		this.altShiftKeys = [];
+		this.controlAltKeys = [];
+		this.controlAltShiftKeys = [];
 		
 		this.keydownHandler = mxUtils.bind(this, function(evt)
 		{
@@ -85,6 +95,28 @@ function mxKeyHandler(graph, target)
 		mxEvent.addListener(this.target, 'keydown', this.keydownHandler);
 	}
 };
+
+/**
+ * Variable: SHIFT
+ *
+ * Modifier mask for the shift key (see <bindKey>). Value is 1.
+ */
+mxKeyHandler.SHIFT = 1;
+
+/**
+ * Variable: CONTROL
+ *
+ * Modifier mask for the control key (see <bindKey> and <isControlDown>).
+ * Value is 2.
+ */
+mxKeyHandler.CONTROL = 2;
+
+/**
+ * Variable: ALT
+ *
+ * Modifier mask for the alt key (see <bindKey>). Value is 4.
+ */
+mxKeyHandler.ALT = 4;
 
 /**
  * Variable: graph
@@ -130,6 +162,34 @@ mxKeyHandler.prototype.controlKeys = null;
 mxKeyHandler.prototype.controlShiftKeys = null;
 
 /**
+ * Variable: altKeys
+ *
+ * Maps from keycodes to functions for pressed alt keys.
+ */
+mxKeyHandler.prototype.altKeys = null;
+
+/**
+ * Variable: altShiftKeys
+ *
+ * Maps from keycodes to functions for pressed alt and shift keys.
+ */
+mxKeyHandler.prototype.altShiftKeys = null;
+
+/**
+ * Variable: controlAltKeys
+ *
+ * Maps from keycodes to functions for pressed control and alt keys.
+ */
+mxKeyHandler.prototype.controlAltKeys = null;
+
+/**
+ * Variable: controlAltShiftKeys
+ *
+ * Maps from keycodes to functions for pressed control, alt and shift keys.
+ */
+mxKeyHandler.prototype.controlAltShiftKeys = null;
+
+/**
  * Variable: enabled
  * 
  * Specifies if events are handled. Default is true.
@@ -165,16 +225,28 @@ mxKeyHandler.prototype.setEnabled = function(enabled)
  * Function: bindKey
  * 
  * Binds the specified keycode to the given function. This binding is used
- * if the control key is not pressed.
+ * if exactly the given modifier keys are pressed. If the given function is
+ * null then the binding is removed.
  * 
  * Parameters:
  *
  * code - Integer that specifies the keycode.
  * funct - JavaScript function that takes the key event as an argument.
+ * modifiers - Optional combination of <mxKeyHandler.SHIFT>,
+ * <mxKeyHandler.CONTROL> and <mxKeyHandler.ALT>. Default is 0.
  */
-mxKeyHandler.prototype.bindKey = function(code, funct)
+mxKeyHandler.prototype.bindKey = function(code, funct, modifiers)
 {
-	this.normalKeys[code] = funct;
+	var keys = this.getKeys(modifiers || 0);
+
+	if (funct != null)
+	{
+		keys[code] = funct;
+	}
+	else
+	{
+		delete keys[code];
+	}
 };
 
 /**
@@ -190,7 +262,7 @@ mxKeyHandler.prototype.bindKey = function(code, funct)
  */
 mxKeyHandler.prototype.bindShiftKey = function(code, funct)
 {
-	this.shiftKeys[code] = funct;
+	this.bindKey(code, funct, mxKeyHandler.SHIFT);
 };
 
 /**
@@ -206,7 +278,7 @@ mxKeyHandler.prototype.bindShiftKey = function(code, funct)
  */
 mxKeyHandler.prototype.bindControlKey = function(code, funct)
 {
-	this.controlKeys[code] = funct;
+	this.bindKey(code, funct, mxKeyHandler.CONTROL);
 };
 
 /**
@@ -222,7 +294,43 @@ mxKeyHandler.prototype.bindControlKey = function(code, funct)
  */
 mxKeyHandler.prototype.bindControlShiftKey = function(code, funct)
 {
-	this.controlShiftKeys[code] = funct;
+	this.bindKey(code, funct, mxKeyHandler.CONTROL | mxKeyHandler.SHIFT);
+};
+
+/**
+ * Function: getKeys
+ *
+ * Returns the array that maps from keycodes to functions for the given
+ * combination of <mxKeyHandler.SHIFT>, <mxKeyHandler.CONTROL> and
+ * <mxKeyHandler.ALT>.
+ *
+ * Parameters:
+ *
+ * modifiers - Combination of the modifier masks.
+ */
+mxKeyHandler.prototype.getKeys = function(modifiers)
+{
+	return [this.normalKeys, this.shiftKeys, this.controlKeys,
+		this.controlShiftKeys, this.altKeys, this.altShiftKeys,
+		this.controlAltKeys, this.controlAltShiftKeys][modifiers];
+};
+
+/**
+ * Function: getModifiers
+ *
+ * Returns the combination of <mxKeyHandler.SHIFT>, <mxKeyHandler.CONTROL>
+ * and <mxKeyHandler.ALT> for the modifier keys that are pressed in the
+ * given event. This uses <isControlDown> for the control key.
+ *
+ * Parameters:
+ *
+ * evt - Key event whose modifier keys should be returned.
+ */
+mxKeyHandler.prototype.getModifiers = function(evt)
+{
+	return ((mxEvent.isShiftDown(evt)) ? mxKeyHandler.SHIFT : 0) |
+		((this.isControlDown(evt)) ? mxKeyHandler.CONTROL : 0) |
+		((mxEvent.isAltDown(evt)) ? mxKeyHandler.ALT : 0);
 };
 
 /**
@@ -251,33 +359,9 @@ mxKeyHandler.prototype.isControlDown = function(evt)
  */
 mxKeyHandler.prototype.getFunction = function(evt)
 {
-	if (evt != null && !mxEvent.isAltDown(evt))
-	{
-		if (this.isControlDown(evt))
-		{
-			if (mxEvent.isShiftDown(evt))
-			{
-				return this.controlShiftKeys[evt.keyCode];
-			}
-			else
-			{
-				return this.controlKeys[evt.keyCode];
-			}
-		}
-		else
-		{
-			if (mxEvent.isShiftDown(evt))
-			{
-				return this.shiftKeys[evt.keyCode];
-			}
-			else
-			{
-				return this.normalKeys[evt.keyCode];
-			}
-		}
-	}
+	var keys = (evt != null) ? this.getKeys(this.getModifiers(evt)) : null;
 	
-	return null;
+	return (keys != null) ? keys[evt.keyCode] : null;
 };
 	
 /**

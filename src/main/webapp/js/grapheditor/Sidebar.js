@@ -19,6 +19,7 @@ function Sidebar(editorUi, container)
 	this.taglist = Object.create(null);
 	this.lastCreated = 0;
 	this.showTooltips = true;
+	this.recentShapes = [];
 	this.graph = editorUi.createTemporaryGraph(this.editorUi.editor.graph.getStylesheet());
     this.graph.cellRenderer.minSvgStrokeWidth = this.minThumbStrokeWidth;
 	this.graph.cellRenderer.antiAlias = this.thumbAntiAlias;
@@ -29,8 +30,10 @@ function Sidebar(editorUi, container)
 	// Uses the initial default style for rendering the sidebars
 	this.initialDefaultVertexStyle = mxUtils.clone(editorUi.editor.graph.defaultVertexStyle);
 	this.initialDefaultEdgeStyle = mxUtils.clone(editorUi.editor.graph.defaultEdgeStyle);
+	// Keys that do not identify a shape in the style to libraries map, eg. the
+	// label perimeter that is added to shapes with labels outside on insert
 	this.ignoredStyles = ['html', 'whiteSpace', 'aspect', 'points', 'verticalLabelPosition',
-		'labelPosition', 'outlineConnect'].concat(Graph.cellStyles);
+		'labelPosition', 'outlineConnect', 'labelPerimeter'].concat(Graph.cellStyles);
 	
 	// Wrapper for entries and footer
 	this.wrapper = document.createElement('div');
@@ -1124,6 +1127,413 @@ Sidebar.prototype.getLibsForStyle = function(style)
 };
 
 /**
+ * Returns the name of the shape of the given style for finding it in the
+ * palettes (see getShapeMatches): the value of shape or the named style at
+ * the start, eg. ellipse, and for images the image, which is the shape, or
+ * an empty string for the default shape.
+ */
+Sidebar.prototype.getShapeName = function(style)
+{
+	var tokens = (typeof style === 'string') ? style.split(';') : [];
+	var name = (tokens[0] != null && tokens[0].indexOf('=') < 0) ? tokens[0] : '';
+	var image = null;
+
+	for (var i = 0; i < tokens.length; i++)
+	{
+		var index = tokens[i].indexOf('=');
+
+		if (index > 0)
+		{
+			var key = tokens[i].substring(0, index);
+
+			if (key == mxConstants.STYLE_SHAPE)
+			{
+				name = tokens[i].substring(index + 1);
+			}
+			else if (key == mxConstants.STYLE_IMAGE)
+			{
+				image = tokens[i].substring(index + 1);
+			}
+		}
+	}
+
+	return (name == mxConstants.SHAPE_IMAGE && image != null) ? name + '\n' + image : name;
+};
+
+/**
+ * Adds the given library to the shapes with the given name and key (see
+ * getShapeName and getKeyStyle) for finding shapes in their palettes (see
+ * getShapeMatches). The default shape is only added with a key.
+ */
+Sidebar.prototype.addShapeForStyle = function(name, key, lib)
+{
+	if (name.length > 0 || key.length > 0)
+	{
+		if (this.shapeKeys == null)
+		{
+			this.shapeKeys = Object.create(null);
+		}
+
+		if (this.shapeKeys[name] == null)
+		{
+			this.shapeKeys[name] = Object.create(null);
+		}
+
+		if (this.shapeKeys[name][key] == null)
+		{
+			this.shapeKeys[name][key] = [];
+		}
+
+		this.shapeKeys[name][key].push(lib);
+		this.shapeMatches = null;
+
+		if (this.shapeIndexes != null)
+		{
+			delete this.shapeIndexes[name];
+		}
+	}
+};
+
+/**
+ * Maximum number of styles whose matches are kept (see getShapeMatches).
+ * Default is 10000.
+ */
+Sidebar.prototype.maxShapeMatches = 10000;
+
+/**
+ * Maximum number of keys of a shape that are visited for the values of a
+ * style and of keys with the fewest values that are compared (see
+ * getClosestKeys). The built-in palettes have at most a few hundred keys for
+ * a shape, crafted libraries can have many more. Default is 1000.
+ */
+Sidebar.prototype.maxClosestKeys = 1000;
+
+/**
+ * Maximum number of values that are counted for a style when keys are
+ * compared, the shorter of the values of each key and of the style (see
+ * getClosestKeys). Keys whose comparison does not fit are skipped. Default is
+ * 10000.
+ */
+Sidebar.prototype.maxClosestKeyValues = 10000;
+
+/**
+ * Returns the shapes of the palettes with the shape of the given style (see
+ * getShapeName) whose keys (see getKeyStyle) are closest to the key of the
+ * style (see getClosestKeys), the first shape of each library, as an array
+ * of objects with the name, the key and the library of each shape, or null
+ * if no palette has the shape. A shape is found in its palette if it was
+ * changed after it was inserted, eg. rotated or with another perimeter,
+ * except for the default shape, eg. rectangles, which are found with the
+ * same key only. The result is kept for each style until shapes are added to
+ * the libraries, in two generations of at most maxShapeMatches styles: a
+ * full generation becomes the old one, whose styles move to the new one when
+ * they are used again, so that the styles of a large selection stay kept and
+ * the styles of later files are kept too.
+ */
+Sidebar.prototype.getShapeMatches = function(style)
+{
+	if (this.shapeMatches == null)
+	{
+		this.shapeMatches = Object.create(null);
+		this.oldShapeMatches = null;
+		this.shapeMatchCount = 0;
+	}
+
+	var result = (typeof style === 'string') ? this.shapeMatches[style] : null;
+
+	if (result === undefined && this.oldShapeMatches != null)
+	{
+		result = this.oldShapeMatches[style];
+
+		if (result !== undefined)
+		{
+			this.addShapeMatch(style, result);
+		}
+	}
+
+	if (result === undefined)
+	{
+		var name = this.getShapeName(style);
+		var keys = (this.shapeKeys != null) ? this.shapeKeys[name] : null;
+		result = null;
+
+		if (keys != null)
+		{
+			var key = this.getKeyStyle(style);
+			var best = (keys[key] != null) ? [key] : [];
+
+			// Closest keys if the shape was changed, except for the default
+			// shape, which is found with the same key only
+			if (best.length == 0 && name.length > 0)
+			{
+				best = this.getClosestKeys(name, key);
+			}
+
+			if (best.length > 0)
+			{
+				var seen = Object.create(null);
+				result = [];
+
+				for (var i = 0; i < best.length; i++)
+				{
+					for (var j = 0; j < keys[best[i]].length; j++)
+					{
+						var lib = keys[best[i]][j];
+
+						if (seen[lib.id] == null)
+						{
+							seen[lib.id] = true;
+							result.push({name: name, key: best[i], lib: lib});
+						}
+					}
+				}
+			}
+		}
+
+		this.addShapeMatch(style, result);
+	}
+
+	return result;
+};
+
+/**
+ * Keeps the given matches of the given style (see getShapeMatches).
+ */
+Sidebar.prototype.addShapeMatch = function(style, result)
+{
+	if (this.shapeMatchCount >= this.maxShapeMatches)
+	{
+		this.oldShapeMatches = this.shapeMatches;
+		this.shapeMatches = Object.create(null);
+		this.shapeMatchCount = 0;
+	}
+
+	this.shapeMatches[style] = result;
+	this.shapeMatchCount++;
+};
+
+/**
+ * Returns the values of the given key of a style (see getKeyStyle) without
+ * the shape, which is part of the name of the shape (see getShapeName).
+ */
+Sidebar.prototype.getKeyValues = function(key)
+{
+	var tokens = key.split(';');
+	var result = [];
+
+	for (var i = 0; i < tokens.length; i++)
+	{
+		if (tokens[i].length > 0 && tokens[i].substring(0, 6) != 'shape=')
+		{
+			result.push(tokens[i]);
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Returns the keys of the shapes with the given name (see addShapeForStyle)
+ * that have the fewest values that are not in both keys with the given key
+ * (see getKeyValues), in the order in which they were added. Only the keys
+ * that share values with the given key and the keys with the fewest values
+ * are compared (see getShapeIndex), with the values they share counted from
+ * their own values. maxClosestKeys and maxClosestKeyValues limit the keys
+ * that are visited and the values that are counted, so that the time for a
+ * style does not grow with the size of a library or the number of values.
+ */
+Sidebar.prototype.getClosestKeys = function(name, key)
+{
+	var index = this.getShapeIndex(name);
+	var values = this.getKeyValues(key);
+	var given = Object.create(null);
+	var seen = Object.create(null);
+	var keys = [];
+
+	for (var i = 0; i < values.length; i++)
+	{
+		given[values[i]] = (given[values[i]] || 0) + 1;
+	}
+
+	// Keys that share values with the given key, rare values first, as they
+	// tell the closest keys apart
+	var rare = values.slice();
+
+	rare.sort(function(a, b)
+	{
+		return ((index.keys[a] != null) ? index.keys[a].length : 0) -
+			((index.keys[b] != null) ? index.keys[b].length : 0);
+	});
+
+	for (var i = 0, visits = 0; i < rare.length && visits < this.maxClosestKeys; i++)
+	{
+		var temp = index.keys[rare[i]];
+
+		for (var j = 0; temp != null && j < temp.length && visits < this.maxClosestKeys; j++, visits++)
+		{
+			if (seen[temp[j]] == null)
+			{
+				seen[temp[j]] = true;
+				keys.push(temp[j]);
+			}
+		}
+	}
+
+	for (var i = 0; i < index.smallest.length; i++)
+	{
+		if (seen[index.smallest[i]] == null)
+		{
+			seen[index.smallest[i]] = true;
+			keys.push(index.smallest[i]);
+		}
+	}
+
+	var result = [];
+	var min = null;
+
+	var distinct = Object.keys(given);
+
+	for (var i = 0, counted = 0; i < keys.length && counted < this.maxClosestKeyValues; i++)
+	{
+		var temp = index.values[keys[i]];
+		var cost = Math.min(temp.length, distinct.length);
+
+		// Skips keys whose comparison does not fit into the remaining values
+		if (counted + cost > this.maxClosestKeyValues)
+		{
+			continue;
+		}
+
+		// Counts the shared values from the shorter list
+		var shared = 0;
+
+		if (temp.length <= distinct.length)
+		{
+			for (var j = 0; j < temp.length; j++)
+			{
+				shared += given[temp[j]] || 0;
+			}
+		}
+		else
+		{
+			var counts = this.getKeyValueCounts(index, keys[i]);
+
+			for (var j = 0; j < distinct.length; j++)
+			{
+				shared += given[distinct[j]] * (counts[distinct[j]] || 0);
+			}
+		}
+
+		counted += cost;
+		var dist = values.length + temp.length - 2 * shared;
+
+		if (min == null || dist < min)
+		{
+			min = dist;
+			result = [keys[i]];
+		}
+		else if (dist == min)
+		{
+			result.push(keys[i]);
+		}
+	}
+
+	result.sort(function(a, b)
+	{
+		return mxUtils.compareNumbers(index.order[a], index.order[b]);
+	});
+
+	return result;
+};
+
+/**
+ * Returns the number of times each value occurs in the given key of the given
+ * index (see getShapeIndex), created when it is first used and kept with the
+ * index (see getClosestKeys).
+ */
+Sidebar.prototype.getKeyValueCounts = function(index, key)
+{
+	if (index.counts == null)
+	{
+		index.counts = Object.create(null);
+	}
+
+	var counts = index.counts[key];
+
+	if (counts == null)
+	{
+		var values = index.values[key];
+		counts = Object.create(null);
+
+		for (var i = 0; i < values.length; i++)
+		{
+			counts[values[i]] = (counts[values[i]] || 0) + 1;
+		}
+
+		index.counts[key] = counts;
+	}
+
+	return counts;
+};
+
+/**
+ * Returns the index of the keys of the shapes with the given name (see
+ * addShapeForStyle) for finding the closest keys (see getClosestKeys): the
+ * keys for each value, the values and the order of each key, and the first
+ * maxClosestKeys keys with the fewest values. The index is created when a
+ * shape with the name is first compared and kept until shapes with the name
+ * are added.
+ */
+Sidebar.prototype.getShapeIndex = function(name)
+{
+	if (this.shapeIndexes == null)
+	{
+		this.shapeIndexes = Object.create(null);
+	}
+
+	var index = this.shapeIndexes[name];
+
+	if (index == null)
+	{
+		index = {keys: Object.create(null), values: Object.create(null),
+			order: Object.create(null), smallest: []};
+		var min = null;
+		var count = 0;
+
+		for (var key in this.shapeKeys[name])
+		{
+			var values = this.getKeyValues(key);
+			index.values[key] = values;
+			index.order[key] = count++;
+
+			for (var i = 0; i < values.length; i++)
+			{
+				if (index.keys[values[i]] == null)
+				{
+					index.keys[values[i]] = [];
+				}
+
+				index.keys[values[i]].push(key);
+			}
+
+			if (min == null || values.length < min)
+			{
+				min = values.length;
+				index.smallest = [key];
+			}
+			else if (values.length == min && index.smallest.length < this.maxClosestKeys)
+			{
+				index.smallest.push(key);
+			}
+		}
+
+		this.shapeIndexes[name] = index;
+	}
+
+	return index;
+};
+
+/**
  * Specifies the maximum time in ms for each slice of the deferred update
  * of the style to libraries map. Default is 8.
  */
@@ -1153,6 +1563,455 @@ Sidebar.prototype.addLibEntry = function(fn, lib)
 
 	this.pendingLibEntries.push({fn: fn, lib: lib});
 	this.scheduleStyleToLibsUpdate();
+
+	// Entry functions of each palette (see getPaletteCells)
+	var id = this.getPaletteIdForLibrary(lib);
+
+	if (this.paletteEntries == null)
+	{
+		this.paletteEntries = Object.create(null);
+	}
+
+	if (this.paletteEntries[id] == null)
+	{
+		this.paletteEntries[id] = [];
+	}
+
+	this.paletteEntries[id].push(fn);
+
+	if (this.paletteShapes != null)
+	{
+		delete this.paletteShapes[id];
+	}
+
+	// Palettes of each library (see getPickerShapes)
+	if (this.libraryPalettes == null)
+	{
+		this.libraryPalettes = Object.create(null);
+	}
+
+	if (this.libraryPalettes[lib.id] == null)
+	{
+		this.libraryPalettes[lib.id] = Object.create(null);
+	}
+
+	this.libraryPalettes[lib.id][id] = true;
+};
+
+/**
+ * Returns the ID of the palette of the given library of the style to
+ * libraries map (see getLibsForStyle).
+ */
+Sidebar.prototype.getPaletteIdForLibrary = function(lib)
+{
+	return (lib.lib != null) ? lib.lib : lib.id;
+};
+
+/**
+ * Returns the cells of the entries of the palette with the given ID (see
+ * getPaletteIdForLibrary) as objects with the cells, the width, the height
+ * and the title of each entry, without creating the templates (see
+ * updateStyleToLibs). Edges are ignored.
+ */
+Sidebar.prototype.getPaletteCells = function(id)
+{
+	var fns = (this.paletteEntries != null) ? this.paletteEntries[id] : null;
+	var result = [];
+
+	if (fns != null)
+	{
+		var createVertexTemplateFromCells = this.createVertexTemplateFromCells;
+		var createEdgeTemplateFromCells = this.createEdgeTemplateFromCells;
+
+		this.createVertexTemplateFromCells = function(cells, width, height, title)
+		{
+			if (cells != null)
+			{
+				result.push({cells: cells, width: width, height: height, title: title});
+			}
+		};
+
+		this.createEdgeTemplateFromCells = function()
+		{
+			// ignore
+		};
+
+		try
+		{
+			for (var i = 0; i < fns.length; i++)
+			{
+				try
+				{
+					fns[i]();
+				}
+				catch (e)
+				{
+					// ignore
+				}
+			}
+		}
+		finally
+		{
+			this.createVertexTemplateFromCells = createVertexTemplateFromCells;
+			this.createEdgeTemplateFromCells = createEdgeTemplateFromCells;
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Returns the entries of the palette with the given ID that are a single
+ * vertex, which may have children, in the order of the palette (see
+ * getPaletteCells). Each entry has the cell, the name of its shape and the
+ * key of its style (see getShapeName and getKeyStyle) and the title, and is
+ * listed once for each shape and title as refresh adds the palettes again.
+ * The entries are kept until entries are added to the palette, so their
+ * cells must not be changed.
+ */
+Sidebar.prototype.getPaletteShapes = function(id)
+{
+	if (this.paletteShapes == null)
+	{
+		this.paletteShapes = Object.create(null);
+	}
+
+	var result = this.paletteShapes[id];
+
+	if (result == null)
+	{
+		var items = this.getPaletteCells(id);
+		var seen = Object.create(null);
+		result = [];
+
+		for (var i = 0; i < items.length; i++)
+		{
+			var cell = (items[i].cells.length == 1) ? items[i].cells[0] : null;
+
+			if (cell != null && this.graph.model.isVertex(cell) && typeof cell.style === 'string')
+			{
+				var name = this.getShapeName(cell.style);
+				var key = this.getKeyStyle(cell.style);
+				var title = items[i].title || '';
+
+				if (seen[name + '\n' + key + '\n' + title] == null)
+				{
+					seen[name + '\n' + key + '\n' + title] = true;
+					result.push({cell: cell, name: name, key: key, title: title});
+				}
+			}
+		}
+
+		this.paletteShapes[id] = result;
+	}
+
+	return result;
+};
+
+/**
+ * Returns the entry of the palette shapes (see getPaletteShapes) of the
+ * closest shape of the given style (see getShapeMatches) in a library that
+ * the given function accepts, or null.
+ */
+Sidebar.prototype.getPaletteShape = function(style, accept)
+{
+	var matches = this.getShapeMatches(style);
+	var result = null;
+
+	for (var i = 0; matches != null && i < matches.length && result == null; i++)
+	{
+		if (accept == null || accept(matches[i].lib))
+		{
+			result = this.getShapeEntry(matches[i].lib, matches[i].name, matches[i].key);
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Returns the entry of the palette shapes (see getPaletteShapes) of the given
+ * library of the style to libraries map with the given name and key or null.
+ */
+Sidebar.prototype.getShapeEntry = function(lib, name, key)
+{
+	var shapes = this.getPaletteShapes(this.getPaletteIdForLibrary(lib));
+	var result = null;
+
+	for (var i = 0; i < shapes.length && result == null; i++)
+	{
+		if (shapes[i].name == name && shapes[i].key == key)
+		{
+			result = shapes[i];
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Returns the entry of the palette shapes (see getPaletteShapes) with the
+ * given name and key in the palettes of the library with the given ID or
+ * null.
+ */
+Sidebar.prototype.getLibraryShape = function(id, name, key)
+{
+	var keys = (this.shapeKeys != null && typeof name === 'string') ? this.shapeKeys[name] : null;
+	var libs = (keys != null && typeof key === 'string') ? keys[key] : null;
+	var result = null;
+
+	for (var i = 0; libs != null && i < libs.length && result == null; i++)
+	{
+		if (libs[i].id == id)
+		{
+			result = this.getShapeEntry(libs[i], name, key);
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Returns true if the library with the given ID has the basic shapes of the
+ * shape picker (see EditorUi.getCellsForShapePicker), ie. the General, Misc
+ * and Advanced palettes.
+ */
+Sidebar.prototype.isBasicLibrary = function(id)
+{
+	return id == 'general';
+};
+
+/**
+ * Maximum number of recent shapes of each library (see addRecentShapes).
+ * Default is 15.
+ */
+Sidebar.prototype.maxRecentShapes = 15;
+
+/**
+ * Maximum number of libraries with recent shapes (see addRecentShapes).
+ * Default is 10.
+ */
+Sidebar.prototype.maxRecentLibraries = 10;
+
+/**
+ * Maximum length of the name and key of a recent shape (see addRecentShapes),
+ * eg. images with data URIs are not recent shapes. Default is 300.
+ */
+Sidebar.prototype.maxRecentShapeLength = 300;
+
+/**
+ * Adds the shapes of palettes of the given cells that were inserted from the
+ * sidebar, the shape picker or the inline toolbar to the recent shapes of
+ * their libraries other than the basic library (see getShapeMatches and
+ * isBasicLibrary). The recent shapes are an array of objects with the ID of
+ * a library and its shapes as arrays of the name and the key, the most recent
+ * first. Fires recentShapesChanged on the UI if shapes were added, so that
+ * they can be stored, and returns true if shapes were added.
+ */
+Sidebar.prototype.addRecentShapes = function(cells)
+{
+	var model = this.editorUi.editor.graph.model;
+	var changed = false;
+
+	for (var i = 0; i < cells.length; i++)
+	{
+		var matches = (model.isVertex(cells[i])) ? this.getShapeMatches(model.getStyle(cells[i])) : null;
+		var seen = Object.create(null);
+
+		for (var j = 0; matches != null && j < matches.length; j++)
+		{
+			var id = matches[j].lib.id;
+
+			if (seen[id] == null && !this.isBasicLibrary(id) && matches[j].name.length +
+				matches[j].key.length <= this.maxRecentShapeLength)
+			{
+				seen[id] = true;
+				this.addRecentShape(id, matches[j].name, matches[j].key);
+				changed = true;
+			}
+		}
+	}
+
+	if (changed)
+	{
+		this.editorUi.fireEvent(new mxEventObject('recentShapesChanged'));
+	}
+
+	return changed;
+};
+
+/**
+ * Adds the shape with the given name and key to the recent shapes of the
+ * library with the given ID (see addRecentShapes).
+ */
+Sidebar.prototype.addRecentShape = function(id, name, key)
+{
+	var lib = {id: id, shapes: []};
+
+	for (var i = 0; i < this.recentShapes.length; i++)
+	{
+		if (this.recentShapes[i] != null && this.recentShapes[i].id == id)
+		{
+			lib = this.recentShapes.splice(i, 1)[0];
+			break;
+		}
+	}
+
+	var shapes = [[name, key]];
+
+	for (var i = 0; Array.isArray(lib.shapes) && i < lib.shapes.length &&
+		shapes.length < this.maxRecentShapes; i++)
+	{
+		if (Array.isArray(lib.shapes[i]) && (lib.shapes[i][0] != name || lib.shapes[i][1] != key))
+		{
+			shapes.push(lib.shapes[i]);
+		}
+	}
+
+	lib.shapes = shapes;
+	this.recentShapes.unshift(lib);
+
+	if (this.recentShapes.length > this.maxRecentLibraries)
+	{
+		this.recentShapes.length = this.maxRecentLibraries;
+	}
+};
+
+/**
+ * Returns the entries of the recent shapes of the library with the given ID
+ * (see addRecentShapes and getLibraryShape), the most recent first.
+ */
+Sidebar.prototype.getRecentShapes = function(id)
+{
+	var result = [];
+
+	for (var i = 0; i < this.recentShapes.length; i++)
+	{
+		var lib = this.recentShapes[i];
+
+		if (lib != null && lib.id == id && Array.isArray(lib.shapes))
+		{
+			for (var j = 0; j < lib.shapes.length; j++)
+			{
+				var entry = (Array.isArray(lib.shapes[j])) ? this.getLibraryShape(
+					id, lib.shapes[j][0], lib.shapes[j][1]) : null;
+
+				if (entry != null)
+				{
+					result.push(entry);
+				}
+			}
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Sets the titles of the shapes of the library with the given ID (see
+ * setCurrentSearchEntryLibrary) for the shape picker, in the order of the
+ * shape picker (see getPickerShapes). A title that is given n times stands
+ * for the first n shapes with that title in the palettes of the library.
+ */
+Sidebar.prototype.setPickerShapes = function(id, titles)
+{
+	if (this.pickerShapes == null)
+	{
+		this.pickerShapes = Object.create(null);
+	}
+
+	this.pickerShapes[id] = titles;
+};
+
+/**
+ * Returns the entries of the shapes for the shape picker of the given library
+ * of the style to libraries map (see getPaletteShapes): the shapes with the
+ * titles of the library in the palettes of the library (see setPickerShapes)
+ * or, if there are no titles, the shapes of the palette of the library after
+ * the given entry, first the shapes of the same kind, eg. images or the
+ * resource icons of AWS, and then the others (see getShapeName).
+ */
+Sidebar.prototype.getPickerShapes = function(lib, entry)
+{
+	var titles = (this.pickerShapes != null) ? this.pickerShapes[lib.id] : null;
+	var result = [];
+
+	if (titles != null)
+	{
+		var byTitle = Object.create(null);
+		var count = Object.create(null);
+
+		for (var id in this.libraryPalettes[lib.id])
+		{
+			var shapes = this.getPaletteShapes(id);
+
+			for (var i = 0; i < shapes.length; i++)
+			{
+				if (byTitle[shapes[i].title] == null)
+				{
+					byTitle[shapes[i].title] = [];
+				}
+
+				byTitle[shapes[i].title].push(shapes[i]);
+			}
+		}
+
+		for (var i = 0; i < titles.length; i++)
+		{
+			var list = byTitle[titles[i]];
+			var n = count[titles[i]] || 0;
+			count[titles[i]] = n + 1;
+
+			if (list != null && n < list.length)
+			{
+				result.push(list[n]);
+			}
+		}
+	}
+	else
+	{
+		var shapes = this.getPaletteShapes(this.getPaletteIdForLibrary(lib));
+		var start = mxUtils.indexOf(shapes, entry) + 1;
+		var others = [];
+
+		// Images are one kind of shape
+		var getKind = function(name)
+		{
+			var index = name.indexOf('\n');
+
+			return (index >= 0) ? name.substring(0, index) : name;
+		};
+
+		var kind = (entry != null) ? getKind(entry.name) : null;
+
+		for (var i = 0; i < shapes.length; i++)
+		{
+			var shape = shapes[(start + i) % shapes.length];
+
+			if (getKind(shape.name) == kind)
+			{
+				result.push(shape);
+			}
+			else
+			{
+				others.push(shape);
+			}
+		}
+
+		result = result.concat(others);
+	}
+
+	return result;
+};
+
+/**
+ * Returns the title of the palette with the given ID.
+ */
+Sidebar.prototype.getPaletteTitle = function(id)
+{
+	var elts = this.palettes[id];
+
+	return (elts != null && elts[0] != null) ? mxUtils.trim(elts[0].textContent) : id;
 };
 
 /**
@@ -1214,7 +2073,9 @@ Sidebar.prototype.updateStyleToLibs = function(hasTime)
 			{
 				for (var i = 0; i < cells.length; i++)
 				{
-					self.addLibForStyle(self.getKeyStyle(cells[i].style), lib);
+					var key = self.getKeyStyle(cells[i].style);
+					self.addLibForStyle(key, lib);
+					self.addShapeForStyle(self.getShapeName(cells[i].style), key, lib);
 				}
 			}
 		};
@@ -1913,6 +2774,10 @@ Sidebar.prototype.addSearchPalette = function(expand)
 	cross.setAttribute('title', mxResources.get('search'));
 	cross.className = 'geAdaptiveAsset';
 
+	// A control for the keyboard only while it resets the search
+	Editor.initKeyboardButton(cross);
+	cross.setAttribute('tabindex', '-1');
+
 	var find;
 
 	inner.appendChild(cross);
@@ -2045,7 +2910,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 		enterAction = fn;
 		var td = item.firstChild.nextSibling.nextSibling;
 		var span = document.createElement('span');
-		span.style.color = 'gray';
+		span.className = 'geMenuShortcut';
 		span.innerHTML = 'Enter';
 		td.appendChild(span);
 	};
@@ -2063,7 +2928,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 
 		var td = item.firstChild.nextSibling.nextSibling;
 		ctrlEnterSpan = document.createElement('span');
-		ctrlEnterSpan.style.color = 'gray';
+		ctrlEnterSpan.className = 'geMenuShortcut';
 		ctrlEnterSpan.innerHTML = (mxClient.IS_MAC) ? 'Cmd+Enter' : 'Ctrl+Enter';
 		td.appendChild(ctrlEnterSpan);
 	};
@@ -2117,7 +2982,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 
 		var td = openLibItem.firstChild.nextSibling.nextSibling;
 		var span = document.createElement('span');
-		span.style.color = 'gray';
+		span.className = 'geMenuShortcut';
 		span.innerHTML = 'Shift+Enter';
 		td.appendChild(span);
 
@@ -2396,6 +3261,7 @@ Sidebar.prototype.addSearchPalette = function(expand)
 	{
 		cross.setAttribute('src', Editor.magnifyImage);
 		cross.setAttribute('title', mxResources.get('search'));
+		cross.setAttribute('tabindex', '-1');
 		center.style.display = 'none';
 		input.value = '';
 		searchTerm = '';
@@ -2625,10 +3491,11 @@ Sidebar.prototype.addSearchPalette = function(expand)
 		else if (evt.keyCode == 38 /* ArrowUp */ || evt.keyCode == 40 /* ArrowDown */)
 		{
 			var menu = editorUi.currentMenu;
+			var items = [];
 
-			if (menu != null && menu.tbody != null)
+			// Shift+Arrow Up and Down only move the focus (see EditorUi.isArrowKeyEvent)
+			if (menu != null && menu.tbody != null && !mxEvent.isShiftDown(evt))
 			{
-				var items = [];
 				var children = menu.tbody.childNodes;
 
 				for (var i = 0; i < children.length; i++)
@@ -2640,42 +3507,54 @@ Sidebar.prototype.addSearchPalette = function(expand)
 						items.push(children[i]);
 					}
 				}
+			}
 
-				if (items.length > 0)
+			if (items.length > 0)
+			{
+				var idx = items.indexOf(selectedItem);
+
+				if (evt.keyCode == 40 /* ArrowDown */)
 				{
-					var idx = items.indexOf(selectedItem);
-
-					if (evt.keyCode == 40 /* ArrowDown */)
-					{
-						idx = (idx + 1) % items.length;
-					}
-					else
-					{
-						idx = (idx <= 0) ? items.length - 1 : idx - 1;
-					}
-
-					if (selectedItem != null)
-					{
-						selectedItem.className = 'mxPopupMenuItem';
-					}
-
-					selectedItem = items[idx];
-					selectedItem.className = 'mxPopupMenuItemHover';
-					selectedItem.scrollIntoView({block: 'nearest'});
-					enterAction = selectedItem._action;
+					idx = (idx + 1) % items.length;
 				}
+				else
+				{
+					idx = (idx <= 0) ? items.length - 1 : idx - 1;
+				}
+
+				if (selectedItem != null)
+				{
+					selectedItem.className = 'mxPopupMenuItem';
+				}
+
+				selectedItem = items[idx];
+				selectedItem.className = 'mxPopupMenuItemHover';
+				selectedItem.scrollIntoView({block: 'nearest'});
+				enterAction = selectedItem._action;
+			}
+			// Moves the focus to the first result or to the control above or
+			// below without a menu
+			else if (!mxEvent.isAltDown(evt) && !mxEvent.isControlDown(evt) &&
+				!mxEvent.isMetaDown(evt) && (evt.keyCode != 40 || !this.focusFirstItem(div)))
+			{
+				editorUi.focusTabStopInDirection(input, evt.keyCode);
 			}
 
 			mxEvent.consume(evt);
 		}
-		else if (evt.keyCode == 9 /* Tab */)
-		{
-			graph.container.focus();
-			mxEvent.consume(evt);
-		}
 		else if (evt.keyCode == 27 /* Escape */)
 		{
-			resetSearch();
+			// Returns to the diagram if there is no search to reset
+			// and no menu to close (closed on keyup in addMenuHandler)
+			if (input.value == '' && searchTerm == '' && editorUi.currentMenu == null)
+			{
+				graph.container.focus();
+			}
+			else
+			{
+				resetSearch();
+			}
+
 			mxEvent.consume(evt);
 		}
 	}));
@@ -2688,11 +3567,13 @@ Sidebar.prototype.addSearchPalette = function(expand)
 			{
 				cross.setAttribute('src', Editor.magnifyImage);
 				cross.setAttribute('title', mxResources.get('search'));
+				cross.setAttribute('tabindex', '-1');
 			}
 			else
 			{
 				cross.setAttribute('src', Editor.crossImage);
 				cross.setAttribute('title', mxResources.get('reset'));
+				cross.setAttribute('tabindex', '0');
 			}
 			
 			if (input.value == '')
@@ -3212,6 +4093,9 @@ Sidebar.prototype.addUmlPalette = function(expand)
 	// Default tags
 	var dt = 'uml static class ';
 	this.setCurrentSearchEntryLibrary('uml');
+	this.setPickerShapes('uml', ['Class', 'Interface', 'Object', 'Package', 'Actor', 'Use Case',
+		'Component', 'Lifeline', 'Frame', 'Boundary Object', 'Entity Object', 'Control Object',
+		'Module', 'Block', 'End', 'Activation Bar']);
 	
 	var fns = [
    		this.createVertexTemplateEntry('html=1;whiteSpace=wrap;', 110, 50, 'Object', 'Object', null, null, dt + 'object instance'),
@@ -3685,10 +4569,30 @@ Sidebar.prototype.createTitle = function(label)
 	elt.appendChild(iconHit);
 
 	var span = document.createElement('span');
+	span.className = 'geTitleLabel';
 	mxUtils.write(span, label);
 	elt.appendChild(span);
 
 	return elt;
+};
+
+/**
+ * Replaces the text of the given title. The label keeps its element, which is
+ * the control for the keyboard (see addFoldingHandler), and the title its
+ * other children.
+ */
+Sidebar.prototype.setTitleText = function(title, text)
+{
+	var label = title.querySelector('.geTitleLabel');
+
+	if (label != null)
+	{
+		mxUtils.setTextContent(label, text);
+	}
+	else
+	{
+		mxUtils.setTextContent(title, text);
+	}
 };
 
 /**
@@ -3817,6 +4721,11 @@ Sidebar.prototype.createItem = function(cells, title, showLabel, showTitle, widt
 	// container hint isn't relevant here. The broken-image branch below
 	// overrides this with the actual cell title.
 	elt.setAttribute('title', '');
+
+	if (title != null)
+	{
+		elt.setAttribute('aria-label', title);
+	}
 	
 	// Blocks default click action
 	mxEvent.addListener(elt, 'click', function(evt)
@@ -4021,9 +4930,11 @@ Sidebar.prototype.createDropHandler = function(cells, allowSplit, allowCellsInse
 		{
 			elt = elt.parentNode;
 		}
-		
+
 		if (elt == null && graph.isEnabled())
 		{
+			// Tab continues in the diagram, not from the dragged shape (see getTabStart)
+			this.editorUi.tabStart = null;
 			cells = graph.getImportableCells(cells);
 			
 			if (cells.length > 0)
@@ -4168,6 +5079,7 @@ Sidebar.prototype.createDropHandler = function(cells, allowSplit, allowCellsInse
 						}
 
 						graph.setSelectionCells(select);
+						this.addRecentShapes(select);
 					}
 
 					if (startEditing || (graph.editAfterInsert && evt != null &&
@@ -4528,7 +5440,9 @@ Sidebar.prototype.dropAndConnect = function(source, targets, direction, dropCell
 		{
 			graph.model.endUpdate();
 		}
-		
+
+		this.addRecentShapes(targets);
+
 		if (graph.editAfterInsert && evt != null && mxEvent.isMouseEvent(evt) &&
 			editingCell != null)
 		{
@@ -5810,6 +6724,9 @@ Sidebar.prototype.itemClicked = function(cells, ds, evt, elt)
 {
 	var graph = this.editorUi.editor.graph;
 	graph.container.focus();
+
+	// Tab continues in the diagram, not from the clicked shape (see getTabStart)
+	this.editorUi.tabStart = null;
 	
 	// Alt+Click inserts and connects
 	if (mxEvent.isAltDown(evt) && graph.getSelectionCount() == 1)
@@ -5906,6 +6823,41 @@ Sidebar.prototype.itemClicked = function(cells, ds, evt, elt)
 Sidebar.prototype.addClickHandler = function(elt, ds, cells, clickFn)
 {
 	var graph = this.editorUi.editor.graph;
+
+	// Shapes are reached with the arrow keys instead of Tab, which would have to
+	// pass all of them, and insert their cells with Enter and Space like a click
+	elt.setAttribute('role', 'button');
+	elt.setAttribute('tabindex', '-1');
+	elt.setAttribute('data-sidebar-item', '1');
+
+	mxEvent.addListener(elt, 'keydown', mxUtils.bind(this, function(evt)
+	{
+		if (!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
+		{
+			if (evt.keyCode == 13 /* Enter */ || evt.keyCode == 32 /* Space */)
+			{
+				if (clickFn != null)
+				{
+					clickFn(evt);
+				}
+
+				if (!mxEvent.isConsumed(evt))
+				{
+					this.itemClicked(cells, ds, evt, elt);
+				}
+
+				mxEvent.consume(evt);
+			}
+			// Arrow keys without Shift scroll the shapes (see EditorUi.isInScrollArea)
+			else if (evt.keyCode >= 37 && evt.keyCode <= 40 && !mxEvent.isAltDown(evt) &&
+				(mxEvent.isShiftDown(evt) || !this.editorUi.isInScrollArea(elt)))
+			{
+				this.focusItemInDirection(elt, evt.keyCode);
+				mxEvent.consume(evt);
+			}
+		}
+	}));
+
 	var oldGetGraphForEvent = ds.getGraphForEvent;
 	var oldMouseDown = ds.mouseDown;
 	var oldMouseMove = ds.mouseMove;
@@ -6189,6 +7141,10 @@ Sidebar.prototype.addFoldingHandler = function(title, content, funct)
 {
 	var initialized = false;
 
+	// The label is the control for the keyboard as the title of a library
+	// also contains its buttons (see Editor.addFocusRing)
+	var control = title.querySelector('.geTitleLabel') || title;
+
 	title.style.backgroundImage = (content.style.display == 'none') ?
 		'url(\'' + Editor.arrowRightImage + '\')' :
 		'url(\'' + Editor.arrowDownImage + '\')';
@@ -6262,18 +7218,120 @@ Sidebar.prototype.addFoldingHandler = function(title, content, funct)
 				}
 				
 				title.style.backgroundImage = 'url(\'' + Editor.arrowDownImage + '\')';
+				control.setAttribute('aria-expanded', 'true');
 			}
 			else
 			{
 				title.style.backgroundImage = 'url(\'' + Editor.arrowRightImage + '\')';
+				control.setAttribute('aria-expanded', 'false');
 				this.setContentVisible(content, false);
 			}
-			
+
 			mxEvent.consume(evt);
 		}
 	}));
 
-	mxEvent.preventDefault(title);
+	// Enter and Space collapse and expand the palette, Shift+Arrow Down moves
+	// into its shapes if it is expanded (see addClickHandler), and Arrow Down
+	// if the shapes do not scroll (see EditorUi.isInScrollArea). A click on
+	// the title keeps the focus where it is.
+	this.editorUi.initKeyboardButton(control);
+	control.setAttribute('aria-expanded', (content.style.display == 'none') ? 'false' : 'true');
+
+	if (control != title)
+	{
+		Editor.addFocusRing(control, title);
+		mxEvent.preventDefault(title);
+	}
+
+	mxEvent.addListener(title, 'keydown', mxUtils.bind(this, function(evt)
+	{
+		if (evt.keyCode == 40 /* Down */ && !mxEvent.isAltDown(evt) && !mxEvent.isControlDown(evt) &&
+			!mxEvent.isMetaDown(evt) && content.style.display != 'none' &&
+			(mxEvent.isShiftDown(evt) || !this.editorUi.isInScrollArea(title)) &&
+			this.focusFirstItem(content))
+		{
+			mxEvent.consume(evt);
+		}
+	}));
+};
+
+/**
+ * Returns the shapes in the given palette that the keyboard reaches (see
+ * addClickHandler).
+ */
+Sidebar.prototype.getKeyboardItems = function(content)
+{
+	var elts = content.querySelectorAll('[data-sidebar-item]');
+	var items = [];
+
+	for (var i = 0; i < elts.length; i++)
+	{
+		if (elts[i].getClientRects().length > 0)
+		{
+			items.push(elts[i]);
+		}
+	}
+
+	return items;
+};
+
+/**
+ * Moves the focus to the first shape in the given palette and returns true if
+ * the focus was moved.
+ */
+Sidebar.prototype.focusFirstItem = function(content)
+{
+	var items = this.getKeyboardItems(content);
+
+	if (items.length > 0)
+	{
+		items[0].focus();
+	}
+
+	return items.length > 0;
+};
+
+/**
+ * Moves the focus from the given shape to the nearest shape of its palette in
+ * the direction of the given arrow key or, if there is none, to the nearest
+ * control, eg. the title of the palette (see EditorUi.focusTabStopInDirection).
+ */
+Sidebar.prototype.focusItemInDirection = function(elt, keyCode)
+{
+	var ui = this.editorUi;
+	var picker = ui.shapePicker;
+	var items = this.getKeyboardItems((picker != null && mxUtils.isAncestorNode(picker, elt)) ?
+		picker : elt.parentNode);
+	var bounds = elt.getBoundingClientRect();
+	var dx = (keyCode == 37) ? -1 : ((keyCode == 39) ? 1 : 0);
+	var dy = (keyCode == 38) ? -1 : ((keyCode == 40) ? 1 : 0);
+	var next = null;
+	var min = null;
+
+	for (var i = 0; i < items.length; i++)
+	{
+		if (items[i] != elt)
+		{
+			var dist = ui.getDirectionalDistance(bounds,
+				items[i].getBoundingClientRect(), dx, dy);
+
+			if (dist != null && (min == null || dist < min))
+			{
+				next = items[i];
+				min = dist;
+			}
+		}
+	}
+
+	if (next != null)
+	{
+		next.focus();
+	}
+	else
+	{
+		ui.focusTabStopInDirection(elt, keyCode);
+	}
 };
 
 /**

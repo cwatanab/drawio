@@ -1437,7 +1437,8 @@ mxArchiMate3Outcome.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
 	// The target as painted: its top is at 0.2 of the width, which is ty of
-	// the height. Relative points, so edges follow a resize
+	// the height. Relative points, so edges follow a resize that keeps the
+	// proportions
 	var ty = (h > 0) ? 0.2 * w / h : 0;
 	var d = 0.4 * Math.SQRT1_2;
 
@@ -2017,19 +2018,23 @@ mxArchiMate3Service.prototype.getConstraints = function(style, w, h)
 	var constr = [];
 	var w1 = Math.max(w - h * 0.5, w * 0.5);
 	var w2 = Math.min(h * 0.5, w * 0.5);
-	
+	// The rounded ends follow the height: anchored to the nearest side with
+	// offsets, so edges follow a resize that keeps the height (eg. a longer
+	// label)
+	var d1 = w1 - w;
+
 	constr.push(new mxConnectionConstraint(new mxPoint(0.5, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(0.5, 1), false));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w1, 0));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w1, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w2, h));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false, null, d1, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 1), false, null, d1, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, w2, 0));
 	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w2, 0));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w1 + h * 0.355, h * 0.145));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w1 + h * 0.5, h * 0.5));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w1 + h * 0.355, h * 0.855));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w2 - h * 0.355, h * 0.145));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w2 - h * 0.5, h * 0.5));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w2 - h * 0.355, h * 0.855));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0.145), false, null, d1 + h * 0.355, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0.5), false, null, d1 + h * 0.5, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0.855), false, null, d1 + h * 0.355, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 0.145), false, null, w2 - h * 0.355, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 0.5), false, null, w2 - h * 0.5, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 0.855), false, null, w2 - h * 0.355, 0));
 
 	return (constr);
 };
@@ -2375,17 +2380,17 @@ mxCellRenderer.registerShape(mxArchiMate3Event.prototype.cst.EVENT, mxArchiMate3
 mxArchiMate3Event.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
-	var w1 = Math.max(w - h * 0.5, w * 0.5);
-	var w2 = Math.min(h * 0.5, w * 0.5);
-	
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w - h * 0.5, 0));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w - h * 0.5, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, 0, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, h * 0.5, h * 0.5));
+	// The notch and the tip follow the height: anchored to the nearest side
+	// with offsets, so edges follow a resize that keeps the height (eg. a
+	// longer label)
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false, null, -h * 0.5, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 1), false, null, -h * 0.5, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 0.5), false, null, h * 0.5, 0));
 	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false));
 	constr.push(new mxConnectionConstraint(new mxPoint(1, 0.5), false));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, (w - h * 0.5) * 0.5, 0));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, (w - h * 0.5) * 0.5, h));
+	constr.push(new mxConnectionConstraint(new mxPoint(0.5, 0), false, null, -h * 0.25, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(0.5, 1), false, null, -h * 0.25, 0));
 
 	return (constr);
 };

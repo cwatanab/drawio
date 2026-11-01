@@ -47,14 +47,15 @@
 			for (var i = 0; i < nodes.length; i++)
 			{
 				var v = new mxCell(nodes[i][0], new mxGeometry(nodes[i][1],
-					nodes[i][2], 100, 40), 'whiteSpace=wrap;html=1;');
+					nodes[i][2], 100, 40), def.vertexStyle);
 				v.vertex = true;
 				vertices.push(container.insert(v));
 			}
 
 			for (var i = 0; i < edges.length; i++)
 			{
-				var e = new mxCell('', new mxGeometry(), layoutEdgeStyle);
+				var e = new mxCell('', new mxGeometry(), (def.edgeStyle != null) ?
+					def.edgeStyle : layoutEdgeStyle);
 				e.geometry.relative = true;
 				e.edge = true;
 				vertices[edges[i][0]].insertEdge(e, true);
@@ -95,6 +96,13 @@
 				'horizontalTree',
 				[['Root', 40, 60], ['Child 1', 180, 20], ['Child 2', 180, 100]],
 				[[0, 1], [0, 2]]),
+			addLayoutContainerEntry('balloon tree layout radial', 'Balloon Tree Layout',
+				'balloonTree',
+				[['Root', 272, 242], ['Child 1', 392, 173], ['Child 2', 272, 380],
+					['Child 3', 153, 173], ['Child 1.1', 427, 40], ['Child 1.2', 525, 209],
+					['Child 2.1', 370, 477], ['Child 2.2', 175, 477], ['Child 3.1', 20, 209],
+					['Child 3.2', 117, 40]],
+				[[0, 1], [0, 2], [0, 3], [1, 4], [1, 5], [2, 6], [2, 7], [3, 8], [3, 9]]),
 			// Flow seeds list the tied siblings in the order ELK's model-order
 			// tie-break places them (first Task on top / left) so a drop
 			// converges without moving anything.

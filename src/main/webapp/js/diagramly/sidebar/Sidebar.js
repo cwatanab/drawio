@@ -1711,22 +1711,19 @@
 									if (error != null)
 									{
 										content.style.display = 'block';
-										title.innerText = '';
-										mxUtils.write(title, this.editorUi.getResource(lib.title));
+										this.setTitleText(title, this.editorUi.getResource(lib.title));
 										showError(error, content);
 									}
 									else if (data != null)
 									{
 										this.editorUi.addLibraryEntries(data, content);
 										content.style.display = 'block';
-										title.innerText = '';
-										mxUtils.write(title, this.editorUi.getResource(lib.title));
+										this.setTitleText(title, this.editorUi.getResource(lib.title));
 									}
 									else
 									{
 										content.style.display = 'none';
-										title.innerText = '';
-										mxUtils.write(title, mxResources.get('loading') + '...');
+										this.setTitleText(title, mxResources.get('loading') + '...');
 									}
 								}
 							});
@@ -1745,8 +1742,7 @@
 									});
 
 									content.style.display = 'none';
-									title.innerText = '';
-									mxUtils.write(title, mxResources.get('loading') + '...');
+									this.setTitleText(title, mxResources.get('loading') + '...');
 									
 									var url = lib.url;
 									
@@ -1758,8 +1754,7 @@
 									this.editorUi.editor.loadUrl(url, mxUtils.bind(this, function(data)
 									{
 										content.style.display = 'block';
-										title.innerText = '';
-										mxUtils.write(title, this.editorUi.getResource(lib.title));
+										this.setTitleText(title, this.editorUi.getResource(lib.title));
 
 										try
 										{

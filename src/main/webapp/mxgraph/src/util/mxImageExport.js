@@ -135,25 +135,80 @@ mxImageExport.prototype.drawCellState = function(state, canvas)
 
 	// Experimental feature
 	var title = this.getTitleForCellState(state, canvas);
-	
-	if (title != null)
-	{
-		canvas.setTitle(title);
-	}
-	
+	var root = (title != null) ? canvas.root : null;
+	var last = (root != null) ? root.lastChild : null;
+
 	// Paints the shape and text
 	this.drawShape(state, canvas);
 	this.drawText(state, canvas);
 
-	if (title != null)
+	if (root != null)
 	{
-		canvas.setTitle(null);
+		this.addTitle(state, canvas, title, root, (last != null) ?
+			last.nextSibling : root.firstChild, link != null);
 	}
 
 	if (link != null)
 	{
 		canvas.setLink(null);
 	}
+};
+
+/**
+ * Function: addTitle
+ * 
+ * Adds the given title to the elements that were drawn for the given state,
+ * which are the children of root from first. The title is added once as the
+ * first child of root if root is the link of the cell, or else of a new group
+ * that contains the elements, and not to each element (see
+ * <mxSvgCanvas2D.setTitle>), so that the size of the output does not grow
+ * with the number of elements times the length of the title. No title is
+ * added if no element was painted.
+ */
+mxImageExport.prototype.addTitle = function(state, canvas, title, root, first, link)
+{
+	if (this.isPainted(first))
+	{
+		var node = root;
+
+		if (!link)
+		{
+			node = canvas.createElement('g');
+			root.insertBefore(node, first);
+
+			while (node.nextSibling != null)
+			{
+				node.appendChild(node.nextSibling);
+			}
+		}
+
+		var temp = canvas.createElement('title');
+		mxUtils.write(temp, title);
+		node.insertBefore(temp, node.firstChild);
+	}
+};
+
+/**
+ * Function: isPainted
+ * 
+ * Returns true if the given node or one of its next siblings is an element
+ * other than a group or a group with such an element, ie. if an element was
+ * painted and not only the empty group of a shape.
+ */
+mxImageExport.prototype.isPainted = function(node)
+{
+	while (node != null)
+	{
+		if (node.nodeType == mxConstants.NODETYPE_ELEMENT &&
+			(node.nodeName != 'g' || this.isPainted(node.firstChild)))
+		{
+			return true;
+		}
+
+		node = node.nextSibling;
+	}
+
+	return false;
 };
 
 /**

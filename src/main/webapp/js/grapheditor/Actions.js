@@ -139,7 +139,15 @@ Actions.prototype.init = function()
 			null, null, null, new mxRectangle(0, 0, 440, 280));
 		dlg.init();
 	}).isEnabled = isGraphEnabled;
-	this.addAction('pageSetup...', function() { ui.showDialog(new PageSetupDialog(ui).container, 420, null, true, true); }).isEnabled = isGraphEnabled;
+	this.addAction('pageSetup...', function()
+	{
+		var dlg = new PageSetupDialog(ui);
+
+		ui.showDialog(dlg.container, 420, null, true, true, function()
+		{
+			dlg.destroy();
+		});
+	}).isEnabled = isGraphEnabled;
 	this.addAction('print...', function() { ui.showPrintDialog(); }, null, '', Editor.ctrlKey + '+P');
 	this.addAction('preview', function() { mxUtils.show(graph, null, 10, 10); });
 	
@@ -518,6 +526,11 @@ Actions.prototype.init = function()
 	this.addAction('selectEdges', function() { graph.selectEdges(); }, null, null, Editor.ctrlKey + '+' + Editor.shiftKey + '+E');
 	this.addAction('selectAll', function() { graph.selectAll(null, true); }, null, null, Editor.ctrlKey + '+A');
 	this.addAction('selectNone', function() { graph.clearSelection(); }, null, null, Editor.ctrlKey + '+' + Editor.shiftKey + '+A');
+	this.addAction('describeSelection', function()
+	{
+		// Says all about the selection again, also if nothing changed
+		ui.announce(ui.getSelectionDetails(), true);
+	}, null, null, Editor.altKey + '+' + Editor.shiftKey + '+D');
 	this.addAction('lockUnlock', function()
 	{
 		if (!graph.isSelectionEmpty())
@@ -1940,6 +1953,19 @@ Actions.prototype.init = function()
 			}
 		}
 	}, null, null,  Editor.altKey + '+' + Editor.shiftKey + '+R');
+	this.addAction('bundle', function()
+	{
+		var tie = graph.bundleEdges(graph.getSelectionCells());
+
+		if (tie != null)
+		{
+			graph.setSelectionCell(tie);
+		}
+	});
+	this.addAction('unbundle', function()
+	{
+		graph.unbundleCells(graph.getSelectionCells());
+	});
 	this.addAction('resetLabelPositions', function()
 	{
 		var cells = graph.getSelectionCells();
@@ -2101,7 +2127,8 @@ Actions.prototype.init = function()
 	    	
 	    	if (state != null)
 	    	{
-	    		value = state.style[mxConstants.STYLE_IMAGE] || value;
+	    		value = graph.getStyleValueForEditing(state.cell, mxConstants.STYLE_IMAGE,
+					state.style[mxConstants.STYLE_IMAGE]) || value;
 				clipPath = state.style[mxConstants.STYLE_CLIP_PATH] || clipPath;
 		    }
 	    	
@@ -2324,6 +2351,55 @@ Actions.prototype.init = function()
 
 	action.setToggleAction(true);
 	action.setSelectedCallback(mxUtils.bind(this, function() { return this.outlineWindow != null && this.outlineWindow.window.isVisible(); }));
+
+	// Moves the focus into the text outline when it is shown
+	action = this.addAction('textOutline', mxUtils.bind(this, function()
+	{
+		if (this.textOutlineWindow == null)
+		{
+			var saved = (ui.installWindowPersistence != null) ?
+				mxSettings.getWindowState('textOutline') : null;
+			var tw = (saved != null && saved.w != null) ? saved.w : 280;
+			var th = (saved != null && saved.h != null) ? saved.h : 360;
+			var tx = (saved != null && saved.x != null) ? saved.x :
+				document.body.offsetWidth - tw - 40;
+			var ty = (saved != null && saved.y != null) ? saved.y : 120;
+
+			this.textOutlineWindow = new TextOutlineWindow(ui, tx, ty, tw, th);
+			this.textOutlineWindow.window.addListener('show', mxUtils.bind(this, function()
+			{
+				ui.fireEvent(new mxEventObject('textOutline'));
+			}));
+			this.textOutlineWindow.window.addListener('hide', function()
+			{
+				ui.fireEvent(new mxEventObject('textOutline'));
+			});
+
+			if (ui.installWindowPersistence != null)
+			{
+				ui.installWindowPersistence('textOutline', this.textOutlineWindow);
+
+				if (saved != null)
+				{
+					ui.restoreWindowState('textOutline', this.textOutlineWindow);
+				}
+			}
+
+			this.textOutlineWindow.window.setVisible(true);
+		}
+		else
+		{
+			this.textOutlineWindow.window.setVisible(!this.textOutlineWindow.window.isVisible());
+		}
+
+		if (this.textOutlineWindow.window.isVisible())
+		{
+			this.textOutlineWindow.focus();
+		}
+	}), null, null, Editor.altKey + '+' + Editor.shiftKey + '+U');
+
+	action.setToggleAction(true);
+	action.setSelectedCallback(mxUtils.bind(this, function() { return this.textOutlineWindow != null && this.textOutlineWindow.window.isVisible(); }));
 };
 
 /**

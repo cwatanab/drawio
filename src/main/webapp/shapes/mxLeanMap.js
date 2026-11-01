@@ -1108,8 +1108,8 @@ mxLeanProductionKanban.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
 
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, 4, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w, 25));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, 4, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false, null, 0, 25));
 
 	return (constr);
 };
@@ -1197,8 +1197,8 @@ mxLeanWithdrawalKanban.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
 
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, 4, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w, 25));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, 4, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false, null, 0, 25));
 
 	return (constr);
 };
@@ -1263,8 +1263,8 @@ mxLeanSignalKanban.prototype.getConstraints = function(style, w, h)
 {
 	var constr = [];
 
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, 4, h));
-	constr.push(new mxConnectionConstraint(new mxPoint(0, 0), false, null, w, 15));
+	constr.push(new mxConnectionConstraint(new mxPoint(0, 1), false, null, 4, 0));
+	constr.push(new mxConnectionConstraint(new mxPoint(1, 0), false, null, 0, 15));
 
 	return (constr);
 };

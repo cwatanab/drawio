@@ -60,6 +60,9 @@ if (!mxIsElectron)
 				'media-src * data:; ' +
 				'font-src * data:; ' +
 				'style-src \'self\' https://fonts.googleapis.com \'unsafe-inline\'; ' +
+				// Google Picker for Allow access in the lightbox of published links
+				// (App.showDriveAccessDialog), as frames would fall back to default-src
+				'frame-src \'self\' https://*.google.com; ' +
 				'base-uri \'none\'; ' +
 				'object-src \'none\'; ' +
 				'worker-src https://viewer.diagrams.net/service-worker.js;'

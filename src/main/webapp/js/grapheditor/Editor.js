@@ -448,9 +448,10 @@ Editor.enableInlineToolbar = true;
 
 /**
  * Whether the inline toolbar is shown for selected shapes and multiple
- * selected cells. Needs enableInlineToolbar. Default is false.
+ * selected cells. Needs enableInlineToolbar. Default is null, which shows
+ * it in the simple theme only (see isShapeInlineToolbarEnabled).
  */
-Editor.enableShapeInlineToolbar = false;
+Editor.enableShapeInlineToolbar = null;
 
 /**
  * Whether new groups are created with transparentBounds=1 so that their
@@ -473,6 +474,18 @@ Editor.enableAutoRotateLabels = true;
 Editor.isDarkMode = function()
 {
 	return Editor.darkMode;
+};
+
+/**
+ * Returns true if the inline toolbar is shown for selected shapes and
+ * multiple selected cells. This is enableShapeInlineToolbar if it is set
+ * or true in the simple theme.
+ */
+Editor.isShapeInlineToolbarEnabled = function()
+{
+	return (Editor.enableShapeInlineToolbar != null) ?
+		Editor.enableShapeInlineToolbar :
+		Editor.currentTheme == 'simple';
 };
 
 /**
@@ -1076,6 +1089,353 @@ Editor.soundex = function(name)
 
 		return s.join('');
 	}
+};
+
+/**
+ * Makes the given element a button for the keyboard: Tab focuses it, Enter and
+ * Space click it (see clickWithKeyboard) or call the given function with the
+ * keystroke and aria-disabled follows its disabled attribute. A click with the
+ * mouse keeps the focus where it is, eg. in the diagram, unless mouseFocus is
+ * true, eg. for a list of choices where the keys continue from a clicked one.
+ */
+Editor.initKeyboardButton = function(elt, funct, mouseFocus)
+{
+	elt.setAttribute('role', 'button');
+	elt.setAttribute('tabindex', '0');
+
+	if (!mouseFocus)
+	{
+		mxEvent.preventDefault(elt);
+	}
+
+	mxEvent.addListener(elt, 'keydown', function(evt)
+	{
+		if ((evt.keyCode == 13 /* Enter */ || evt.keyCode == 32 /* Space */) &&
+			!mxEvent.isAltDown(evt) && !mxEvent.isControlDown(evt) &&
+			!mxEvent.isMetaDown(evt))
+		{
+			if (funct != null)
+			{
+				funct(evt);
+			}
+			else
+			{
+				Editor.clickWithKeyboard(elt, evt);
+			}
+
+			mxEvent.consume(evt);
+		}
+	});
+
+	// Disabled with the attribute or with the mxDisabled class, eg. in Layers
+	var updateDisabled = function()
+	{
+		elt.setAttribute('aria-disabled', (elt.hasAttribute('disabled') ||
+			elt.classList.contains('mxDisabled')) ? 'true' : 'false');
+	};
+
+	updateDisabled();
+
+	if (window.MutationObserver != null)
+	{
+		new MutationObserver(updateDisabled).observe(elt,
+			{attributes: true, attributeFilter: ['disabled', 'class']});
+	}
+};
+
+/**
+ * Keeps the keyboard focus in the given list whose controls are created again
+ * after a click, eg. the folders of a file dialog: if the focused control is
+ * removed, the first control that is added next gets the focus, eg. the first
+ * entry of the folder or the first entry of the next page after More.
+ */
+Editor.keepFocusInList = function(container)
+{
+	var inside = false;
+
+	mxEvent.addListener(container, 'focusin', function()
+	{
+		inside = true;
+	});
+
+	// Removing the focused control fires no focusout with a target
+	mxEvent.addListener(container, 'focusout', function(evt)
+	{
+		if (evt.relatedTarget != null && !mxUtils.isAncestorNode(
+			container, evt.relatedTarget))
+		{
+			inside = false;
+		}
+	});
+
+	if (window.MutationObserver != null)
+	{
+		new MutationObserver(function(records)
+		{
+			if (inside && (document.activeElement == null ||
+				document.activeElement == document.body))
+			{
+				for (var i = 0; i < records.length; i++)
+				{
+					for (var j = 0; j < records[i].addedNodes.length; j++)
+					{
+						var node = records[i].addedNodes[j];
+
+						if (node.nodeType == mxConstants.NODETYPE_ELEMENT &&
+							mxUtils.isAncestorNode(container, node))
+						{
+							var stops = (node.tabIndex >= 0 && node.getAttribute('tabindex') != null) ?
+								[node] : Dialog.getTabStops(node);
+
+							if (stops.length > 0)
+							{
+								stops[0].focus();
+
+								return;
+							}
+						}
+					}
+				}
+			}
+		}).observe(container, {childList: true, subtree: true});
+	}
+};
+
+/**
+ * Shows the keyboard focus of the given element, eg. the label of a page tab,
+ * as a ring on the given container (class geFocusRing), eg. the tab. This is
+ * for containers with other controls, which cannot be controls themselves as
+ * screen readers do not announce controls inside of controls.
+ */
+Editor.addFocusRing = function(elt, container)
+{
+	elt.classList.add('geFocusLabel');
+
+	mxEvent.addListener(elt, 'focus', function()
+	{
+		var visible = true;
+
+		try
+		{
+			visible = elt.matches(':focus-visible');
+		}
+		catch (e)
+		{
+			// ignores unsupported :focus-visible
+		}
+
+		container.classList.toggle('geFocusRing', visible);
+	});
+
+	mxEvent.addListener(elt, 'blur', function()
+	{
+		container.classList.remove('geFocusRing');
+	});
+};
+
+/**
+ * Clicks the given element for the given keystroke, with Shift like a click
+ * with Shift, eg. to show only one tag.
+ */
+Editor.clickWithKeyboard = function(elt, evt)
+{
+	elt.dispatchEvent(new MouseEvent('click', {bubbles: true,
+		cancelable: true, shiftKey: mxEvent.isShiftDown(evt)}));
+};
+
+/**
+ * Makes the controls in the rows of the given container, eg. the layers with
+ * their buttons, one tab stop for the keyboard: the arrow keys move between
+ * the rows and the controls of a row, Home and End to the first and last row,
+ * Enter and Space click the control (see clickWithKeyboard) and Shift+arrow
+ * keys are left to the other controls (see EditorUi.isArrowKeyEvent). The
+ * optional function handles other keystrokes for a control and returns true
+ * if it handled them. Lists that are created again call begin, addRow for each
+ * row in the order of the rows and end, which keeps the focus and the tab stop
+ * on the same control of the same row, eg. after a click changed the model.
+ * If directional is true, Shift+arrow keys also move the focus to each control
+ * like to the controls around the grid, eg. for the colors of the color dialog
+ * (see EditorUi.getDirectionalStops), and the tab stop follows the focus.
+ */
+Editor.createKeyboardGrid = function(container, keyFn, directional)
+{
+	var rows = [];
+	var entry = null;
+	var position = null;
+	var focused = null;
+
+	function getPosition(elt)
+	{
+		for (var i = 0; i < rows.length; i++)
+		{
+			var j = mxUtils.indexOf(rows[i].controls, elt);
+
+			if (j >= 0)
+			{
+				return {row: i, key: rows[i].key, column: j};
+			}
+		}
+
+		return null;
+	};
+
+	function getControl(pos)
+	{
+		var row = null;
+
+		for (var i = 0; i < rows.length && row == null; i++)
+		{
+			if (rows[i].key === pos.key)
+			{
+				row = rows[i];
+			}
+		}
+
+		// Next row if the row was removed
+		if (row == null && pos.row != null && rows.length > 0)
+		{
+			row = rows[Math.min(pos.row, rows.length - 1)];
+		}
+
+		return (row != null && row.controls.length > 0) ?
+			row.controls[Math.min(pos.column, row.controls.length - 1)] : null;
+	};
+
+	function setEntry(elt)
+	{
+		if (entry != null && entry != elt)
+		{
+			if (entry.nodeName == 'INPUT' || directional)
+			{
+				entry.setAttribute('tabindex', '-1');
+			}
+			else
+			{
+				entry.removeAttribute('tabindex');
+			}
+		}
+
+		entry = elt;
+
+		if (elt != null)
+		{
+			elt.setAttribute('tabindex', '0');
+			position = getPosition(elt);
+		}
+	};
+
+	if (directional)
+	{
+		mxEvent.addListener(container, 'focusin', function(evt)
+		{
+			var source = mxEvent.getSource(evt);
+
+			if (source != entry && getPosition(source) != null)
+			{
+				setEntry(source);
+			}
+		});
+	}
+
+	mxEvent.addListener(container, 'keydown', function(evt)
+	{
+		var source = mxEvent.getSource(evt);
+		var pos = getPosition(source);
+
+		if (pos != null && !source.isContentEditable && !mxEvent.isAltDown(evt) &&
+			!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
+		{
+			var next = null;
+
+			if (keyFn != null && keyFn(evt, source, pos.key, pos.column))
+			{
+				mxEvent.consume(evt);
+			}
+			else if (!mxEvent.isShiftDown(evt) && evt.keyCode >= 35 && evt.keyCode <= 40)
+			{
+				var row = (evt.keyCode == 36 /* Home */) ? 0 : ((evt.keyCode == 35 /* End */) ?
+					rows.length - 1 : pos.row + ((evt.keyCode == 38 /* Up */) ? -1 :
+					((evt.keyCode == 40 /* Down */) ? 1 : 0)));
+				var column = pos.column + ((evt.keyCode == 37 /* Left */) ? -1 :
+					((evt.keyCode == 39 /* Right */) ? 1 : 0));
+
+				if (row >= 0 && row < rows.length && column >= 0 &&
+					column < rows[row].controls.length)
+				{
+					next = rows[row].controls[column];
+				}
+				else if (row >= 0 && row < rows.length && column == pos.column)
+				{
+					next = rows[row].controls[rows[row].controls.length - 1];
+				}
+
+				if (next != null)
+				{
+					setEntry(next);
+					next.focus();
+					mxEvent.consume(evt);
+				}
+			}
+			// Space in a checkbox is native
+			else if (evt.keyCode == 13 /* Enter */ || (evt.keyCode == 32 /* Space */ &&
+				source.nodeName != 'INPUT'))
+			{
+				Editor.clickWithKeyboard(source, evt);
+				mxEvent.consume(evt);
+			}
+		}
+	});
+
+	return {
+		begin: function()
+		{
+			focused = getPosition(document.activeElement);
+			rows = [];
+		},
+		addRow: function(key, controls)
+		{
+			for (var i = 0; i < controls.length; i++)
+			{
+				// Directional controls can get the focus without being a tab stop
+				if (controls[i].nodeName == 'INPUT' || (directional &&
+					!controls[i].hasAttribute('tabindex')))
+				{
+					controls[i].setAttribute('tabindex', '-1');
+				}
+
+				if (directional)
+				{
+					controls[i].classList.add('geDirectionalStop');
+				}
+			}
+
+			rows.push({key: key, controls: controls});
+		},
+		end: function(key, column)
+		{
+			var elt = (position != null) ? getControl(position) : null;
+
+			if (elt == null && rows.length > 0)
+			{
+				elt = getControl({key: key, column: column || 0}) || rows[0].controls[0];
+			}
+
+			setEntry(elt);
+
+			if (focused != null)
+			{
+				var next = getControl(focused);
+
+				if (next != null)
+				{
+					setEntry(next);
+					next.focus();
+				}
+			}
+
+			focused = null;
+		}
+	};
 };
 
 /**
@@ -1860,6 +2220,7 @@ OpenFile.prototype.cancel = function(cancel)
 function Dialog(editorUi, elt, w, h, modal, closable, onClose, noScroll, transparent, minSize, ignoreBgClick)
 {
 	this.editorUi = editorUi;
+	this.returnFocus = this.getReturnFocus();
 
 	if (this.bg == null)
 	{
@@ -1889,6 +2250,31 @@ function Dialog(editorUi, elt, w, h, modal, closable, onClose, noScroll, transpa
 	}
 
 	div.appendChild(elt);
+	div.setAttribute('role', 'dialog');
+
+	if (modal)
+	{
+		div.setAttribute('aria-modal', 'true');
+	}
+
+	// Names the dialog after its title for screen readers, or after the
+	// aria-label of its content for dialogs without a title
+	var title = elt.querySelector('h3, .geDialogTitle');
+
+	if (title != null)
+	{
+		if (title.id == '')
+		{
+			title.id = 'geDialogTitle' + Dialog.titleCount++;
+		}
+
+		div.setAttribute('aria-labelledby', title.id);
+	}
+	else if (elt.getAttribute('aria-label') != null)
+	{
+		div.setAttribute('aria-label', elt.getAttribute('aria-label'));
+		elt.removeAttribute('aria-label');
+	}
 
 	if (document.body != null)
 	{
@@ -1915,6 +2301,7 @@ function Dialog(editorUi, elt, w, h, modal, closable, onClose, noScroll, transpa
 			editorUi.hideDialog(true);
 		}));
 		
+		Editor.initKeyboardButton(closeImg);
 		div.appendChild(closeImg);
 		
 		if (!ignoreBgClick)
@@ -1949,6 +2336,39 @@ function Dialog(editorUi, elt, w, h, modal, closable, onClose, noScroll, transpa
 	}
 	
 	editorUi.editor.fireEvent(new mxEventObject('showDialog'));
+};
+
+/**
+ * Counter for the IDs of dialog titles without an ID.
+ */
+Dialog.titleCount = 0;
+
+/**
+ * Returns the focused control if the focus goes back to it when the dialog
+ * closes. This is a control outside of the diagram that was focused with the
+ * keyboard, eg. a button in the format panel or in another dialog. Text
+ * fields are ignored as they also match :focus-visible after a click.
+ */
+Dialog.prototype.getReturnFocus = function()
+{
+	var elt = document.activeElement;
+	var result = null;
+
+	try
+	{
+		if (elt != null && elt != document.body && !this.editorUi.isTextInputElement(elt) &&
+			!mxUtils.isAncestorNode(this.editorUi.editor.graph.container, elt) &&
+			elt.matches(':focus-visible'))
+		{
+			result = elt;
+		}
+	}
+	catch (e)
+	{
+		// ignores unsupported :focus-visible
+	}
+
+	return result;
 };
 
 /**
@@ -1996,6 +2416,7 @@ Dialog.prototype.getPosition = function(left, top)
 Dialog.prototype.addResizeHandler = function(minSize)
 {
 	var resize = document.createElement('img');
+	resize.setAttribute('alt', '');
 	resize.setAttribute('src', mxWindow.prototype.resizeImage);
 	resize.style.cursor = 'nwse-resize';
 	resize.style.position = 'absolute';
@@ -2356,7 +2777,16 @@ Dialog.prototype.installFocusTrap = function()
  */
 Dialog.prototype.getTabStops = function()
 {
-	var elts = this.container.querySelectorAll('a[href], button, input, ' +
+	return Dialog.getTabStops(this.container);
+};
+
+/**
+ * Returns the controls in the given container that can be focused with Tab
+ * in document order.
+ */
+Dialog.getTabStops = function(container)
+{
+	var elts = container.querySelectorAll('a[href], button, input, ' +
 		'select, textarea, iframe, summary, [tabindex], [contenteditable]');
 	var stops = [];
 
@@ -2364,7 +2794,9 @@ Dialog.prototype.getTabStops = function()
 	{
 		var elt = elts[i];
 
+		// Disabled buttons, eg. Undo in the toolbar, are skipped like disabled fields
 		if (elt.tabIndex >= 0 && !elt.disabled && elt.type != 'hidden' &&
+			!elt.hasAttribute('disabled') && !elt.classList.contains('mxDisabled') &&
 			(elt.parentNode == null || !elt.parentNode.isContentEditable) &&
 			elt.getClientRects().length > 0 &&
 			mxUtils.getCurrentStyle(elt).visibility != 'hidden')
@@ -2374,6 +2806,34 @@ Dialog.prototype.getTabStops = function()
 	}
 
 	return stops;
+};
+
+/**
+ * Checks the given radio button if the given field is clicked or changed and
+ * removes the checked attribute of the optional other radio button. Not on
+ * focus, which comes back to the focused field if the window gets the focus
+ * again, eg. after a click into another app in Firefox, and changed the option
+ * although the field was not used (Kym, 2026-10-22). Returns the function that
+ * checks the radio button for values that are set by the dialog. This is here
+ * as the print dialog of the viewer uses it (see PrintDialog.create).
+ */
+Dialog.checkRadioOnInput = function(field, radio, other)
+{
+	var check = function()
+	{
+		if (other != null)
+		{
+			other.removeAttribute('checked');
+		}
+
+		radio.setAttribute('checked', 'checked');
+		radio.checked = true;
+	};
+
+	mxEvent.addGestureListeners(field, check);
+	mxEvent.addListener(field, 'input', check);
+
+	return check;
 };
 
 /**
@@ -2963,12 +3423,17 @@ PrintDialog.createPrintPreview = function(graph, scale, pf, border, x0, y0, auto
 		return !node.className == 'geHint' && isTextLabel.apply(this, arguments);
 	};
 
-	// Makes relative links absolute
+	// Makes relative links absolute, except if the base URL is a file: URL
+	// (see Graph.isFileBaseUrl), where the links are kept as they are and
+	// checked instead, as no base URL is prepended that neuters a scheme
 	var getLinkForCellState = preview.getLinkForCellState;
 
 	preview.getLinkForCellState = function(state)
 	{
-		return graph.getAbsoluteUrl(getLinkForCellState.apply(this, arguments));
+		var link = getLinkForCellState.apply(this, arguments);
+
+		return (graph.isFileBaseUrl()) ? Graph.sanitizeLink(link) :
+			graph.getAbsoluteUrl(link);
 	};
 
 	return preview;
@@ -3213,6 +3678,10 @@ var PageSetupDialog = function(editorUi)
 
 	advanced.content.appendChild(scaleRow);
 
+	// Options of the current page (see EditorUi.addPageSetupOptions)
+	var applyPageOptions = editorUi.addPageSetupOptions(advanced.content,
+		styleLabel, styleContent);
+
 	// Initial view section — lets the author pin the page's opening viewport
 	// (pan + zoom). Stored on the diagram node via ChangePageView and restored
 	// by EditorUi.fitInitialView on the fitDiagramOnLoad / fitDiagramOnPage
@@ -3391,6 +3860,123 @@ var PageSetupDialog = function(editorUi)
 		advanced.wrapper.appendChild(animationSection);
 	}
 
+	// Style rules and data sources of the page, whose actions open their
+	// dialogs on top of this one (added by the diagramly layer). The optional
+	// other action gets a button with the given label while it is visible, and
+	// its function gets a function(text, error, busy) that shows its status
+	// in the hint of the row.
+	// Removed when the dialog is closed (see destroy)
+	var modelListeners = [];
+
+	var addPageAction = function(name, hint, otherName, otherLabel)
+	{
+		var action = editorUi.actions.get(name);
+
+		if (action != null)
+		{
+			var section = document.createElement('div');
+			section.className = 'geDialogSection';
+
+			var row = document.createElement('div');
+			row.className = 'geDialogFormRow geDialogFormRowTop';
+
+			var label = document.createElement('span');
+			label.className = 'geDialogFormLabel';
+			label.style.minWidth = '0';
+			mxUtils.write(label, mxResources.get(name) + ':');
+			row.appendChild(label);
+
+			var content = document.createElement('div');
+			content.style.cssText = 'flex:1;min-width:0;display:flex;align-items:flex-start;gap:8px;';
+
+			// Hint and status below each other, top-aligned with the label
+			var texts = document.createElement('div');
+			texts.style.cssText = 'flex:1 1 auto;min-width:0;padding-top:4px;';
+			content.appendChild(texts);
+
+			var hintElt = document.createElement('div');
+			hintElt.className = 'geDialogHint';
+			mxUtils.write(hintElt, hint);
+			texts.appendChild(hintElt);
+
+			var editBtn = mxUtils.button(mxResources.get('edit'), function()
+			{
+				action.funct();
+			});
+
+			editBtn.className = 'geBtn';
+			editBtn.style.minWidth = '90px';
+			editBtn.disabled = !action.isEnabled();
+
+			// The buttons are below each other
+			var buttons = document.createElement('div');
+			buttons.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+			buttons.appendChild(editBtn);
+			content.appendChild(buttons);
+
+			var other = (otherName != null) ? editorUi.actions.get(otherName) : null;
+
+			if (other != null)
+			{
+				// Screen readers announce the status
+				var statusElt = document.createElement('div');
+				statusElt.className = 'geDialogHint';
+				statusElt.setAttribute('aria-live', 'polite');
+				texts.appendChild(statusElt);
+				var statusThread = null;
+
+				var otherBtn = mxUtils.button(otherLabel, function()
+				{
+					other.funct(function(text, error, busy)
+					{
+						window.clearTimeout(statusThread);
+						statusElt.style.color = (error) ?
+							'light-dark(var(--error-color), var(--dark-error-color))' : '';
+						statusElt.style.marginTop = '4px';
+						statusElt.textContent = text;
+						otherBtn.disabled = busy || !other.isEnabled();
+
+						// A result without errors disappears after a while
+						if (!error && !busy)
+						{
+							statusThread = window.setTimeout(function()
+							{
+								statusElt.style.marginTop = '';
+								statusElt.textContent = '';
+							}, PageSetupDialog.statusDelay);
+						}
+					});
+				});
+
+				otherBtn.className = 'geBtn';
+				otherBtn.style.minWidth = '90px';
+				otherBtn.disabled = !other.isEnabled();
+				buttons.appendChild(otherBtn);
+
+				// Changes of the dialogs on top of this one, such as the first
+				// data source, show or hide the button
+				var updateOther = function()
+				{
+					otherBtn.style.display = (other.isVisible()) ? '' : 'none';
+				};
+
+				graph.getModel().addListener(mxEvent.CHANGE, updateOther);
+				modelListeners.push(updateOther);
+				otherBtn.style.display = (other.isVisible()) ? '' : 'none';
+			}
+
+			row.appendChild(styleContent(content));
+			section.appendChild(row);
+			advanced.wrapper.appendChild(section);
+		}
+	};
+
+	addPageAction('styleRules', mxResources.get('pageStyleRulesHint', null,
+		'Changes the style of the shapes whose data matches.'));
+	addPageAction('dataSources', mxResources.get('pageDataSourcesHint', null,
+		'Fills or creates shapes with the rows of Google Sheets or CSV files.'),
+		'refreshDataSources', mxResources.get('refreshAll', null, 'Refresh All'));
+
 	// Apply function
 	var applyFn = function()
 	{
@@ -3464,6 +4050,11 @@ var PageSetupDialog = function(editorUi)
 			graph.model.execute(new ChangePageView(editorUi,
 				editorUi.currentPage, pendingViewBox));
 		}
+
+		if (applyPageOptions != null)
+		{
+			applyPageOptions();
+		}
 	};
 
 	// Exposes each button's own label as its tooltip so the full text stays
@@ -3482,8 +4073,23 @@ var PageSetupDialog = function(editorUi)
 	}
 
 	var dlg = new CustomDialog(editorUi, div, applyFn, null,
-		mxResources.get('apply'));
+		mxResources.get('apply'), 'https://www.drawio.com/docs/manual/pages/page-setup/');
 	this.container = dlg.container;
+
+	/**
+	 * Removes the listeners of the dialog when it is closed. A listener that
+	 * removes itself while the model fires a change makes the model skip the
+	 * next listener of that change (see mxEventSource.fireEvent).
+	 */
+	this.destroy = function()
+	{
+		for (var i = 0; i < modelListeners.length; i++)
+		{
+			graph.getModel().removeListener(modelListeners[i]);
+		}
+
+		modelListeners = [];
+	};
 };
 
 /**
@@ -3784,6 +4390,12 @@ PageSetupDialog.addPageFormatPanel = function(div, namePostfix, pageFormat, page
 };
 
 /**
+ * Milliseconds after which the result of an action in the Advanced section
+ * disappears (errors are kept).
+ */
+PageSetupDialog.statusDelay = 5000;
+
+/**
  * 
  */
 PageSetupDialog.getFormats = function()
@@ -4051,6 +4663,7 @@ FilenameDialog.filenameHelpLink = null;
 FilenameDialog.createFileTypes = function(editorUi, nameInput, types)
 {
 	var typeSelect = document.createElement('select');
+	typeSelect.setAttribute('aria-label', mxResources.get('format'));
 
 	for (var i = 0; i < types.length; i++)
 	{

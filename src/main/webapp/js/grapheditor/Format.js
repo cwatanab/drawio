@@ -344,10 +344,12 @@ Format.prototype.immediateRefresh = function()
 				if (currentLabel != null)
 				{
 					currentLabel.classList.remove('geActiveFormatTitle');
+					currentLabel.setAttribute('aria-selected', 'false');
 				}
 
 				currentLabel = elt;
 				currentLabel.classList.add('geActiveFormatTitle');
+				currentLabel.setAttribute('aria-selected', 'true');
 
 				if (currentPanel != panel)
 				{
@@ -363,6 +365,9 @@ Format.prototype.immediateRefresh = function()
 		});
 		
 		mxEvent.addListener(elt, 'click', clickHandler);
+		ui.initKeyboardButton(elt);
+		elt.setAttribute('role', 'tab');
+		elt.setAttribute('aria-selected', 'false');
 
 		var currentIndex = (containsLabel) ? this.labelIndex :
 			((graph.isSelectionEmpty()) ? this.diagramIndex :
@@ -479,6 +484,7 @@ Format.prototype.immediateRefresh = function()
 	}
 	
 	div.className = 'geFormatTitleContainer';
+	div.setAttribute('role', 'tablist');
 
 	// Restores focus and selection on the rebuilt input
 	this.restoreFocus(focusState);
@@ -489,18 +495,40 @@ Format.prototype.immediateRefresh = function()
  * after the panel DOM is rebuilt in immediateRefresh. The input is
  * identified by its index among the focusable controls in the panel
  * (the rebuild is deterministic for a given selection, so the order
- * is stable). Returns null if focus is not on a panel input, in which
- * case restoreFocus is a no-op (eg. focus is in the canvas).
+ * is stable). Other controls that were focused with the keyboard, eg.
+ * To Front or the tabs of the panel, are identified by their index among
+ * the visible controls. Returns null if focus is not on a panel control,
+ * in which case restoreFocus is a no-op (eg. focus is in the canvas).
  */
 Format.prototype.captureFocus = function()
 {
 	var active = document.activeElement;
 
-	if (active == null || !this.container.contains(active) ||
-		(active.nodeName != 'INPUT' && active.nodeName != 'SELECT' &&
-		active.nodeName != 'TEXTAREA'))
+	if (active == null || !this.container.contains(active))
 	{
 		return null;
+	}
+	else if (active.nodeName != 'INPUT' && active.nodeName != 'SELECT' &&
+		active.nodeName != 'TEXTAREA')
+	{
+		var state = null;
+
+		try
+		{
+			var index = mxUtils.indexOf(Dialog.getTabStops(this.container), active);
+
+			if (index >= 0 && active.matches(':focus-visible'))
+			{
+				state = {stop: index, nodeName: active.nodeName,
+					role: active.getAttribute('role')};
+			}
+		}
+		catch (e)
+		{
+			// ignores unsupported :focus-visible
+		}
+
+		return state;
 	}
 
 	var focusables = this.container.querySelectorAll('input, select, textarea');
@@ -538,6 +566,18 @@ Format.prototype.restoreFocus = function(state)
 {
 	if (state == null)
 	{
+		return;
+	}
+	else if (state.stop != null)
+	{
+		var stop = Dialog.getTabStops(this.container)[state.stop];
+
+		if (stop != null && stop.nodeName == state.nodeName &&
+			stop.getAttribute('role') == state.role)
+		{
+			stop.focus({preventScroll: true});
+		}
+
 		return;
 	}
 
@@ -792,6 +832,148 @@ BaseFormatPanel.prototype.createTitle = function(title)
 };
 
 /**
+ * Resource keys of the labels of the style keys that rules can set (see
+ * Graph.dataStyleKeys).
+ */
+Format.styleRuleKeyLabels = {fillColor: 'fillColor', gradientColor: 'gradient',
+	strokeColor: 'strokeColor', fontColor: 'fontColor',
+	labelBackgroundColor: 'backgroundColor', labelBorderColor: 'borderColor',
+	swimlaneFillColor: 'laneColor', opacity: 'opacity', fillOpacity: 'fillOpacity',
+	strokeOpacity: 'lineOpacity', textOpacity: 'textOpacity', strokeWidth: 'linewidth',
+	fontSize: 'fontSize', fontStyle: 'fontStyle', rotation: 'rotation',
+	dashed: 'dashed', rounded: 'rounded', shadow: 'shadow', image: 'image'};
+
+/**
+ * Returns the label of the given style key that rules can set.
+ */
+Format.getStyleRuleKeyLabel = function(key)
+{
+	var name = (Object.prototype.hasOwnProperty.call(Format.styleRuleKeyLabels, key)) ?
+		Format.styleRuleKeyLabels[key] : null;
+
+	return (name != null) ? mxResources.get(name, null, key) : key;
+};
+
+/**
+ * Returns the given style keys that a rule of the page sets for a selected
+ * cell (see Graph.getStyleRuleKeys).
+ */
+BaseFormatPanel.prototype.getStyleRuleKeys = function(keys)
+{
+	var graph = this.editorUi.editor.graph;
+	var result = [];
+
+	if (graph.getStyleRules().length > 0)
+	{
+		// The keys are kept for all panels of the selection
+		var ss = this.editorUi.getSelectionState();
+
+		if (ss.styleRuleKeys == null)
+		{
+			ss.styleRuleKeys = Object.create(null);
+
+			for (var i = 0; i < ss.cells.length; i++)
+			{
+				var tmp = graph.getStyleRuleKeys(ss.cells[i]);
+
+				for (var j = 0; j < tmp.length; j++)
+				{
+					ss.styleRuleKeys[tmp[j]] = true;
+				}
+			}
+		}
+
+		for (var i = 0; i < keys.length; i++)
+		{
+			if (keys[i] != null && ss.styleRuleKeys[keys[i]])
+			{
+				result.push(keys[i]);
+			}
+		}
+	}
+
+	return result;
+};
+
+/**
+ * Adds an icon to the given row or title if a rule of the page sets one of
+ * the given style keys for a selected cell, as changes of these values in
+ * the panel have no effect. Its tooltip names the values. The icon is added
+ * after the label and opens the rules when clicked.
+ */
+BaseFormatPanel.prototype.addStyleRuleHint = function(row, keys)
+{
+	var ruleKeys = (row != null && row.getElementsByClassName('geStyleRuleHint').length == 0) ?
+		this.getStyleRuleKeys(keys) : [];
+
+	if (ruleKeys.length > 0)
+	{
+		var labels = [];
+
+		for (var i = 0; i < ruleKeys.length; i++)
+		{
+			labels.push(Format.getStyleRuleKeyLabel(ruleKeys[i]));
+		}
+
+		var title = mxResources.get('setByRule', null, 'Set by a style rule') +
+			': ' + labels.join(', ');
+		var hint = document.createElement('span');
+		hint.className = 'geStyleRuleHint';
+		hint.setAttribute('title', title);
+		hint.setAttribute('aria-label', title);
+		hint.setAttribute('role', 'img');
+
+		// Funnel, as rules apply to the cells whose data matches
+		var svg = document.createElementNS(mxConstants.NS_SVG, 'svg');
+		svg.setAttribute('viewBox', '0 0 16 16');
+		svg.setAttribute('width', '12');
+		svg.setAttribute('height', '12');
+		svg.setAttribute('aria-hidden', 'true');
+		var path = document.createElementNS(mxConstants.NS_SVG, 'path');
+		path.setAttribute('d', 'M1 2h14l-5.5 6.5V14l-3-1.5v-4z');
+		path.setAttribute('fill', 'currentColor');
+		svg.appendChild(path);
+		hint.appendChild(svg);
+
+		var action = this.editorUi.actions.get('styleRules');
+
+		if (action != null && action.isEnabled())
+		{
+			hint.style.cursor = 'pointer';
+			hint.setAttribute('role', 'button');
+			hint.setAttribute('tabindex', '0');
+
+			mxEvent.addListener(hint, 'click', function(evt)
+			{
+				action.funct();
+				mxEvent.consume(evt);
+			});
+
+			mxEvent.addListener(hint, 'keydown', function(evt)
+			{
+				if (evt.key == 'Enter' || evt.key == ' ')
+				{
+					action.funct();
+					mxEvent.consume(evt);
+				}
+			});
+		}
+
+		var after = row.firstChild;
+
+		while (after != null && !(after.nodeType == mxConstants.NODETYPE_TEXT &&
+			mxUtils.trim(after.nodeValue).length > 0) && after.nodeName != 'SPAN')
+		{
+			after = after.nextSibling;
+		}
+
+		row.insertBefore(hint, (after != null) ? after.nextSibling : null);
+	}
+
+	return row;
+};
+
+/**
  * Creates a collapsible section with a toggle chevron.
  * Returns {wrapper, contentDiv} where contentDiv is the
  * container for section content.
@@ -817,12 +999,15 @@ BaseFormatPanel.prototype.createCollapsibleSection = function(title, defaultColl
 	wrapper.appendChild(contentDiv);
 
 	var ui = this.format.editorUi;
+	ui.initKeyboardButton(titleDiv);
+	titleDiv.setAttribute('aria-expanded', (collapsed) ? 'false' : 'true');
 
 	mxEvent.addListener(titleDiv, 'click', function()
 	{
 		titleDiv.classList.toggle('geExpanded');
 		contentDiv.classList.toggle('geCollapsed');
 		state[title] = !titleDiv.classList.contains('geExpanded');
+		titleDiv.setAttribute('aria-expanded', (state[title]) ? 'false' : 'true');
 		ui.fireEvent(new mxEventObject('collapsedSectionsChanged'));
 	});
 
@@ -993,6 +1178,20 @@ BaseFormatPanel.prototype.createStepper = function(input, update, step, disableF
 	{
 		changeValue(-(mxEvent.isShiftDown(evt) ? bigStep : step), '2', evt);
 		mxEvent.consume(evt);
+	});
+
+	// Arrow Up and Down in the input step the value like the stepper for the
+	// keyboard (Shift+arrow keys move the focus, see EditorUi.isArrowKeyEvent)
+	mxEvent.addListener(input, 'keydown', function(evt)
+	{
+		if ((evt.keyCode == 38 /* Up */ || evt.keyCode == 40 /* Down */) &&
+			!mxEvent.isShiftDown(evt) && !mxEvent.isAltDown(evt) &&
+			!mxEvent.isControlDown(evt) && !mxEvent.isMetaDown(evt))
+		{
+			changeValue((evt.keyCode == 38) ? step : -step,
+				(evt.keyCode == 38) ? '0' : '2', evt);
+			mxEvent.consume(evt);
+		}
 	});
 	
 	// Disables transfer of focus to DIV but also :active CSS
@@ -1274,6 +1473,7 @@ BaseFormatPanel.prototype.createColorOption = function(label, getColorFn, setCol
 	if (!mxClient.IS_TOUCH)
 	{
 		dropper = document.createElement('img');
+		dropper.setAttribute('alt', '');
 		dropper.src = Editor.colorDropperImage;
 		dropper.className = 'geColorDropper geAdaptiveAsset';
 
@@ -1775,7 +1975,7 @@ BaseFormatPanel.prototype.createCellColorOption = function(label, colorKey, defa
 };
 
 /**
- * 
+ *
  */
 BaseFormatPanel.prototype.addArrow = function(elt)
 {
@@ -1969,7 +2169,7 @@ BaseFormatPanel.prototype.createRelativeOption = function(label, key, width, han
 		init(input);
 	}
 
-	return div;
+	return this.addStyleRuleHint(div, [key]);
 };
 
 /**
@@ -2162,6 +2362,7 @@ ArrangePanel.prototype.init = function()
 		if (!ss.containsLabel || ss.edges.length == 0)
 		{
 			var angleSec = this.createCollapsibleSection(mxResources.get('rotation'), true);
+			this.addStyleRuleHint(angleSec.wrapper.firstChild, [mxConstants.STYLE_ROTATION]);
 			var anglePanel = this.addAngle(this.createPanel());
 			angleSec.contentDiv.appendChild(anglePanel);
 
@@ -2537,7 +2738,8 @@ ArrangePanel.prototype.addGroupOps = function(div)
 	var ss = ui.getSelectionState();
 
 	var count = this.addActions(div, ['group', 'ungroup']) +
-		this.addActions(div, ['removeFromGroup']);
+		this.addActions(div, ['removeFromGroup']) +
+		this.addActions(div, ['editLayout', 'editOutline']);
 
 	if (!ss.cell && !ss.row)
 	{
@@ -3185,6 +3387,7 @@ ArrangePanel.prototype.addGeometry = function(container)
 		ui.actions.get('autosize').funct();
 	});
 
+	ui.initKeyboardButton(autosizeBtn);
 	div.appendChild(autosizeBtn);
 	
 	if (rect.row)
@@ -3900,6 +4103,7 @@ ArrangePanel.prototype.addGeometryHandler = function(input, fn)
 								
 								if (!fn(geo, value, cells[i]))
 								{
+									graph.keepResizeCenter(cells[i], geo);
 									var state = graph.view.getState(cells[i]);
 									
 									if (state != null && graph.isRecursiveVertexResize(state))
@@ -4756,6 +4960,9 @@ TextFormatPanel.prototype.addFont = function(container)
 	var ss = ui.getSelectionState();
 	
 	var title = this.createTitle(mxResources.get('font'));
+	this.addStyleRuleHint(title, [mxConstants.STYLE_FONTCOLOR, mxConstants.STYLE_FONTSIZE,
+		mxConstants.STYLE_FONTSTYLE, mxConstants.STYLE_LABEL_BACKGROUNDCOLOR,
+		mxConstants.STYLE_LABEL_BORDERCOLOR]);
 	container.appendChild(title);
 
 	var stylePanel = this.createPanel();
@@ -5887,7 +6094,10 @@ TextFormatPanel.prototype.addFont = function(container)
 			{
 				ui.menus.addInsertTableItem(menu, null, null, false);
 			})), null, Editor.tableImage, insertPanel)];
-		
+
+		// Names the table menu for screen readers as it shows only an image
+		btns[1].setAttribute('title', mxResources.get('table'));
+
 		var wrapper2 = this.createPanel();
 		wrapper2.appendChild(this.createTitle(mxResources.get('insert')));
 		wrapper2.appendChild(insertPanel);
@@ -6658,11 +6868,16 @@ StyleFormatPanel.prototype.init = function()
 		if (ss.fill)
 		{
 			var fillSec = this.createCollapsibleSection(mxResources.get('fill'), false);
+			this.addStyleRuleHint(fillSec.wrapper.firstChild, [mxConstants.STYLE_FILLCOLOR,
+				mxConstants.STYLE_GRADIENTCOLOR, mxConstants.STYLE_FILL_OPACITY,
+				mxConstants.STYLE_SWIMLANE_FILLCOLOR]);
 			fillSec.contentDiv.appendChild(this.addFill(this.createPanel()));
 			this.container.appendChild(fillSec.wrapper);
 		}
 
 		var strokeSec = this.createCollapsibleSection(mxResources.get('line'), false);
+		this.addStyleRuleHint(strokeSec.wrapper.firstChild, [mxConstants.STYLE_STROKECOLOR,
+			mxConstants.STYLE_STROKEWIDTH, mxConstants.STYLE_STROKE_OPACITY, mxConstants.STYLE_DASHED]);
 		var strokePanel = this.addStroke(this.createPanel());
 		var lineJumpsPanel = this.addLineJumps(this.createPanel());
 		lineJumpsPanel.style.borderTop = 'none';
@@ -6692,6 +6907,8 @@ StyleFormatPanel.prototype.init = function()
 		this.container.appendChild(opacityPanel);
 
 		var effectsSec = this.createCollapsibleSection(mxResources.get('effects'), true);
+		this.addStyleRuleHint(effectsSec.wrapper.firstChild, [mxConstants.STYLE_SHADOW,
+			mxConstants.STYLE_ROUNDED]);
 		effectsSec.contentDiv.appendChild(this.addEffects(this.createPanel()));
 		this.container.appendChild(effectsSec.wrapper);
 	}
@@ -6749,11 +6966,10 @@ StyleFormatPanel.prototype.addSvgStyles = function(container)
 	try
 	{
 		var exp = ss.style.editableCssRules;
-		
-		if (exp != null)
+		var matches = (exp != null) ? Graph.createCssRuleMatcher(exp) : null;
+
+		if (matches != null)
 		{
-			var regex = new RegExp(exp);
-			
 			var data = ss.style.image.substring(ss.style.image.indexOf(',') + 1);
 			var xml = (window.atob) ? decodeURIComponent(escape(atob((data)))) :
 				Base64.decode(data, true);
@@ -6773,7 +6989,7 @@ StyleFormatPanel.prototype.addSvgStyles = function(container)
 					for (var j = 0; j < rules.length; j++)
 					{
 						this.addSvgRule(container, rules[j], svg, styles[i],
-							rules, j, regex, singleColorMode, setColorScheme);
+							rules, j, matches, singleColorMode, setColorScheme);
 					}
 				}
 			}
@@ -6801,12 +7017,12 @@ StyleFormatPanel.prototype.getColorSchemeFromCss = function(cssString)
  * Adds the label menu items to the given menu and parent.
  */
 StyleFormatPanel.prototype.addSvgRule = function(container, rule, svg, styleElem, rules,
-	ruleIndex, regex, singleColorMode, setColorScheme)
+	ruleIndex, matches, singleColorMode, setColorScheme)
 {
 	var ui = this.editorUi;
 	var graph = ui.editor.graph;
-	
-	if (regex.test(rule.selectorText))
+
+	if (matches(rule.selectorText))
 	{
 		var addStyleRule = mxUtils.bind(this, function(rule, key, label, tempSingleColorMode)
 		{
@@ -7023,6 +7239,7 @@ StyleFormatPanel.prototype.addEditOps = function(div)
 	if (ss.cells.length == 1)
 	{
 		var editSelect = document.createElement('select');
+		editSelect.setAttribute('aria-label', mxResources.get('edit'));
 		editSelect.style.position = 'relative';
 		editSelect.style.marginBottom = '2px';
 		editSelect.className = 'geFullWidthElement';
@@ -7593,7 +7810,7 @@ StyleFormatPanel.prototype.addStroke = function(container)
 	
 	lineColor.style.fontWeight = 'bold';
 	lineColor.appendChild(styleSelect);
-	
+
 	// Used if only edges selected
 	var stylePanel = colorPanel.cloneNode(false);
 	stylePanel.style.position = 'relative';
@@ -8810,6 +9027,7 @@ DiagramStylePanel.prototype.addView = function(div)
 				}
 			});
 
+			ui.initKeyboardButton(img);
 			row2.appendChild(img);
 		}
 
@@ -8854,15 +9072,19 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 			{
 				var style = graph.getCellStyle(cells[i]);
 				
-				// Handles special label background color
-				if (!ignoreGraphStyle && style['labelBackgroundColor'] != null)
+				// Handles special label background color and keeps label gaps
+				// (see Graph.replaceLabelGap)
+				if (style['defaultLabelBackgroundColor'] != 'page')
 				{
-					graph.updateCellStyles({'labelBackgroundColor': (graphStyle != null) ?
-						graphStyle.background : null}, [cells[i]]);
-				}
-				else if (ignoreGraphStyle)
-				{
-					graph.updateCellStyles({'labelBackgroundColor': mxConstants.NONE}, [cells[i]]);
+					if (!ignoreGraphStyle && style['labelBackgroundColor'] != null)
+					{
+						graph.updateCellStyles({'labelBackgroundColor': (graphStyle != null) ?
+							graphStyle.background : null}, [cells[i]]);
+					}
+					else if (ignoreGraphStyle)
+					{
+						graph.updateCellStyles({'labelBackgroundColor': mxConstants.NONE}, [cells[i]]);
+					}
 				}
 				
 				var edge = model.isEdge(cells[i]);
@@ -8931,11 +9153,21 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 
 	var ignoreGraphStyle = true;
 
+	// Returns true if the given unresolved style has a label gap, which is
+	// kept (see Graph.replaceLabelGap)
+	var isLabelGap = function(style)
+	{
+		var value = style['defaultLabelBackgroundColor'];
+
+		return style['labelBackgroundColor'] == 'default' &&
+			(value == 'page' || value == 'gap');
+	};
+
 	var applyStyle = mxUtils.bind(this, function(style, result, cell, graphStyle, theGraph)
 	{
 		if (style != null)
 		{
-			if (cell != null)
+			if (cell != null && !isLabelGap(result))
 			{
 				// Handles special label background color
 				if (!ignoreGraphStyle && result['labelBackgroundColor'] != null)
@@ -9110,14 +9342,10 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 				panel.style.backgroundColor = graphStyle.background;
 			}
 			
-			createPreview(commonStyle, vertexStyle, edgeStyle, graphStyle, panel); 
-			
-			mxEvent.addGestureListeners(panel, mxUtils.bind(this, function(evt)
+			createPreview(commonStyle, vertexStyle, edgeStyle, graphStyle, panel);
+
+			var applyEntry = mxUtils.bind(this, function()
 			{
-				panel.style.opacity = 0.6;
-			}), null, mxUtils.bind(this, function(evt)
-			{
-				panel.style.opacity = '';
 				graph.currentVertexStyle = mxUtils.clone(graph.defaultVertexStyle);
 				graph.currentEdgeStyle = mxUtils.clone(graph.defaultEdgeStyle);
 				
@@ -9146,8 +9374,20 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 				{
 					model.endUpdate();
 				}
+			});
+
+			mxEvent.addGestureListeners(panel, mxUtils.bind(this, function(evt)
+			{
+				panel.style.opacity = 0.6;
+			}), null, mxUtils.bind(this, function(evt)
+			{
+				panel.style.opacity = '';
+				applyEntry();
 			}));
 			
+			Editor.initKeyboardButton(panel, applyEntry);
+			panel.setAttribute('aria-label', mxResources.get('style') + ' ' + (index + 1));
+
 			if (!mxClient.IS_TOUCH)
 			{
 				mxEvent.addListener(panel, 'mouseenter', mxUtils.bind(this, function(evt)
@@ -9168,6 +9408,13 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 						resolve = (resolve != null) ? resolve : true;
 						var result = mxUtils.clone(prev.apply(this, arguments));
 						
+						// Label gaps of resolved styles are unresolved for applyStyle
+						// and resolved again below (see Graph.replaceLabelGap)
+						if (resolve && result['defaultLabelBackgroundColor'] == 'page')
+						{
+							result['labelBackgroundColor'] = 'default';
+						}
+
 						var defaultStyle = graph.stylesheet.getDefaultVertexStyle();
 						var appliedStyle = vertexStyle;
 						
@@ -9260,6 +9507,8 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 				}));
 			}))(i, dot);
 			
+			ui.initKeyboardButton(dot);
+			dot.setAttribute('aria-label', String(i + 1));
 			switcher.appendChild(dot);
 			dots.push(dot);
 		}
@@ -9288,6 +9537,11 @@ DiagramStylePanel.prototype.addGraphStyles = function(div)
 			{
 				selectPage(mxUtils.mod(this.format.currentStylePage + 1, pageCount));
 			}));
+
+			ui.initKeyboardButton(left);
+			left.setAttribute('aria-label', mxResources.get('left'));
+			ui.initKeyboardButton(right);
+			right.setAttribute('aria-label', mxResources.get('right'));
 		}
 	}
 	else

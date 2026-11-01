@@ -50,12 +50,13 @@ EditorUi.initMinimalTheme = function()
 				var x = Math.max(10, ui.diagramContainer.clientWidth - 248);
 				var y = 60;
 				var h = Math.min(600, graph.container.clientHeight - 10);
+				var format = null;
 
 				ui.formatWindow = new WrapperWindow(ui, '', x, y, 240, h,
 					function(container)
 				{
 					container.className = 'geSidebarContainer geFormatContainer';
-					var format = ui.createFormat(container);
+					format = ui.createFormat(container);
 					format.init();
 				});
 
@@ -67,6 +68,12 @@ EditorUi.initMinimalTheme = function()
 				ui.formatWindow.window.addListener(mxEvent.SHOW, mxUtils.bind(this, function()
 				{
 					ui.formatWindow.window.fit();
+
+					// Changes while the window was hidden were not shown (see Format.immediateRefresh)
+					if (format != null)
+					{
+						format.refresh();
+					}
 				}));
 				
 				ui.formatWindow.window.minimumSize = new mxRectangle(0, 0, 240, 80);
@@ -81,27 +88,25 @@ EditorUi.initMinimalTheme = function()
 		{
 			if (ui.formatElt == null)
 			{
+				// Like the format window, in the column of the format panel
+				// of the editor (see .geEditor)
 				ui.formatElt = ui.createSidebarContainer();
+				ui.formatElt.classList.add('geFormatContainer');
 				var format = ui.createFormat(ui.formatElt);
 				format.init();
 				ui.formatElt.style.border = 'none';
 				ui.formatElt.style.width = '240px';
 				ui.formatElt.style.borderLeftWidth = '1px';
 				ui.formatElt.style.borderLeftStyle = 'solid';
-				ui.formatElt.style.right = '0px';
 			}
-
-			var wrapper = ui.diagramContainer.parentNode;
 
 			if (ui.formatElt.parentNode != null)
 			{
 				ui.formatElt.parentNode.removeChild(ui.formatElt);
-				wrapper.style.right = '0px';
 			}
 			else
 			{
-				wrapper.parentNode.appendChild(ui.formatElt);
-				wrapper.style.right = ui.formatElt.style.width;
+				ui.diagramContainer.parentNode.appendChild(ui.formatElt);
 			}
 		}
 	};
@@ -158,23 +163,27 @@ EditorUi.initMinimalTheme = function()
 			if (ui.sidebarElt == null)
 			{
 				ui.sidebarElt = ui.createSidebarContainer();
-				ui.createShapesPanel(ui.sidebarElt);
+
+				// The shapes panel adds its buttons to the parent of its content
+				// like in the shapes window (see WrapperWindow)
+				var content = document.createElement('div');
+				content.style.width = '100%';
+				content.style.height = '100%';
+				ui.sidebarElt.appendChild(content);
+				ui.createShapesPanel(content);
 				ui.sidebarElt.style.border = 'none';
 				ui.sidebarElt.style.width = '210px';
 				ui.sidebarElt.style.borderRight = '1px solid gray';
 			}
 
-			var wrapper = ui.diagramContainer.parentNode;
-
+			// In the column of the shapes of the editor (see .geEditor)
 			if (ui.sidebarElt.parentNode != null)
 			{
 				ui.sidebarElt.parentNode.removeChild(ui.sidebarElt);
-				wrapper.style.left = '0px';
 			}
 			else
 			{
-				wrapper.parentNode.appendChild(ui.sidebarElt);
-				wrapper.style.left = ui.sidebarElt.style.width;
+				ui.diagramContainer.parentNode.appendChild(ui.sidebarElt);
 			}
 		}
 	};
@@ -267,7 +276,8 @@ EditorUi.initMinimalTheme = function()
     EditorUi.prototype.isFormatPanelVisible = function()
     {
 		return (this.formatWindow != null && this.formatWindow.window.isVisible()) ||
-			(this.formatWindow == null && this.formatWidth > 0);
+			(this.formatWindow == null && this.formatElt != null &&
+			this.formatElt.parentNode != null);
     };
 	
 	// Initializes the user interface
@@ -338,6 +348,26 @@ EditorUi.initMinimalTheme = function()
 				div.parentNode.removeChild(div);
 			}
 		}));
+	};
+
+	/**
+	 * Tab order: the toolbar at the top, the shapes, the diagram, the format
+	 * window and the page tabs with the zoom (see EditorUi.getTabStops). The
+	 * shapes and the format are panels without windows (see toggleShapes).
+	 */
+	EditorUi.prototype.getTabRegions = function()
+	{
+		return [this.minimalMenubarElt, (this.sidebarWindow != null) ?
+			this.sidebarWindow.window.div : this.sidebarElt, this.editor.graph.container,
+			this.getFormatRegion(), this.tabContainer];
+	};
+
+	/**
+	 * The format panel is the format window, or the panel without windows.
+	 */
+	EditorUi.prototype.getFormatRegion = function()
+	{
+		return (this.formatWindow != null) ? this.formatWindow.window.div : this.formatElt;
 	};
 
 	var formatWindowInitialized = false;
@@ -425,6 +455,7 @@ EditorUi.initMinimalTheme = function()
 		ui.toolbar = this.createToolbar(ui.createDiv('geToolbar'));
 		var menubar = document.createElement('div');
 		menubar.className = 'geMenubarContainer';
+		ui.minimalMenubarElt = menubar;
 		var menuObj = new Menubar(ui, menubar);
 
 		function addMenu(id, small, img)
@@ -475,8 +506,8 @@ EditorUi.initMinimalTheme = function()
                 mxEvent.consume(evt);
             });
 
-			mxEvent.preventDefault(btn);
-            
+			ui.initKeyboardButton(btn);
+
             if (tooltip != null)
             {
                 btn.setAttribute('title', tooltip);
@@ -771,14 +802,14 @@ EditorUi.initMinimalTheme = function()
             	ui.menus.tagsWindow.window.fit();
             }
 
-            if (ui.menus.findWindow != null)
+            if (ui.findWindow != null)
             {
-            	ui.menus.findWindow.window.fit();
+            	ui.findWindow.window.fit();
             }
 
-            if (ui.menus.findReplaceWindow != null)
+            if (ui.findReplaceWindow != null)
             {
-            	ui.menus.findReplaceWindow.window.fit();
+            	ui.findReplaceWindow.window.fit();
             }
 		});
 	};

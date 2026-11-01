@@ -51,7 +51,11 @@
 		};
 		
 		this.setCurrentSearchEntryLibrary('er');
-		
+		this.setPickerShapes('er', ['Table 1', 'Entity', 'Entity', 'Weak Entity', 'Attribute',
+			'Key Attribute', 'Relationship', 'Identifying Relationship', 'Associative Entity',
+			'Multivalue Attribute', 'Derived Attribute', 'Weak Key Attribute', 'Table 2', 'List',
+			'Note']);
+
 		var fns = [
 	   		this.addDataEntry(dt, 180, 160, 'Table 1', '7ZnfbpswFMafhtuJPyNrbqFbNy2TpqZ7ADc+AUvGZsYZSZ9+x9gkVQhtMqVkopGIZB8fn9jfz/4uwIvSYn2nSJn/kBS4F332olRJqW2rWKfAuRf6jHrRrReGPv688EvPaNCM+iVRIPQxE0I74Q/hK7CRB/LIwUYrveEuWuWkNE3djEZJpYnSc/ZkYpGPgYUUmjABCgNB0+eclBVr0m0kZ5zOyEaudFuo7SVLtgZ6L+vK5SpZz7CY6ZriSyw+d4sxw4SzTGB7gbs0/5goqHAtM1Jpl5Hrgrum2yEoDetelZqQk+gOZAFabTClZlTnLuPGKunnwLK8nRa7IKlsINvO3YmODaf7YQZRh8HL8qNOZodSsScjOnciPUfS9GtWcCLgKxC6F0ok3bTSMs5TyaXhJqSADjqTRJUsH4jKQLtAKZnQzZbjBB8UIfU/xF6Ma02xH+z6+Jh0pVMpKq3wiJgagKRqMLQSLUtXlMOyra+cxKb9KLWWxSkww8MwN05uh+w1ttEZ0H7soP35vRcubkEzwu9hoYnIuEUhhOnuUBzgdVDBrWr7cu7fJYliLrk5Urc5oxTwXiV1zjTMS7IwSTWa0z/cqOjVGxWdKLorttPn5GqEo10IovECrAStOiS36zwKbtyB+0uw3yv4dnthxK092tykQpBMZDM7c7J3BuLhz8C6/yLGZz0TR5U776GYXM38KDP3z2PmkwHN/NPxaIe550BZW+8tnXwyeie/6ZA11zL0g//dyAdGPmbjnl6Ne0jjng5o3IH/Tp17OnrnDoIe67404YtZdw/zMVt30H2LdfXuN/TuIBzSvE94PTYq8w56IIzJvbvvx6x7R+/Vvfugj8i+sbv7vmHTn3/++As='),
 	   		this.addDataEntry(dt, 180, 160, 'Table 2', '7Zlvb9owEMY/Td5O+VNYeZt07aQyaSr9Ai4+EkuOHTlmgX76nWOnUELWINFQZUgg+S7nI35+9gMKXpTkmwdFiuyXpMC96IcXJUpKbUf5JgHOvdBn1IvuvDD08e2F9x1Xg/qqXxAFQveZENoJfwhfg808kxcONlvqLXfZMiOFGer6ahSXmii9YK8mF/mYWEqhCROgMBHUMeekKFldbjMZ43ROtnKtm0ZNFK/YBuiTrEpXq2Q1x2YmNM1X2HzhbsZcJpylAsdLXKX5xFhBifcyJ6V2FZnOuRtWGdOwKMjSzK5Qacy5VYPSsOlUrk452R5A5qDVFksqRnXmKm6tun4GLM2aaROXJKVNpG9zdyBw4Fgc5xK1uPwbCWpnVi0VezUguBNuH1MdVyznRMBPIPQgFUu6beRmnCeSS8NSSAEtnKaIKlk8E5WCdolCMqHrJU9ifKEIif9t4k3wXhOMg12ML1OudCJFqRVuG9MDkF4FhmCsZeGaclg1/ZWT2IxfpNYyd8Ee615cw+Nct055R+8jzNEZKN+0KP9+RJnuH4NO2rgQzQh/gqUmIuWWjRAm3LE5AvCopO9k3Nf38MBJlHTFzR67yxilIM50xKIPj9j0ROlds50+J3cjHD1FEI0nYi1o2eL5dp+9EE9aiM1RDf1LE24s1NbGJcJjIp3bmdODLTAZfgts3gPbP43hWbdEr3bn3RPTq7n3MveDL/IzmPux7fRZ5v69y9y7aY/L3KejN/fbDnO/NOEvY+4dW2DM5j67mvuFfrnPBjT3wO+PeZgzD5Q1/T7T1GejN/Ug6HD16Ku7+sDMx+ziQfvB2NXGh7HxN9qD+PgJD9pG5eNBB4QxGXn78Zo18pv/1ci7oI/IyTHc/Xtiy/f/XPkL'),

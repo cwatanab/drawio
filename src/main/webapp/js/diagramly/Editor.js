@@ -343,6 +343,13 @@
 	Editor.enableWindowDocking = urlParams['embedInline'] != '1';
 
 	/**
+	 * Specifies if the windows that were visible when the page was last
+	 * closed, eg. Layers, Outline and Tags, should be shown again on
+	 * startup. Default is true.
+	 */
+	Editor.restoreVisibleWindows = true;
+
+	/**
 	 * Specifies paste should be at the mouse pointer location. Default is true.
 	 */
 	Editor.pasteAtMousePointer = true;
@@ -836,6 +843,15 @@
         {
     		return mxUtils.getValue(state.style, 'curved', '0') == '1';
         }},
+        {name: 'trimCurve', dispName: 'Trim Curve', type: 'bool', defVal: false, isVisible: function(state)
+        {
+			// Shapes that paint curves with mxConnector.paintCutCurve
+			var shape = mxUtils.getValue(state.style, mxConstants.STYLE_SHAPE, 'connector');
+
+			return (mxUtils.getValue(state.style, 'curved', '0') == '1' ||
+				mxUtils.getValue(state.style, 'bezier', '0') == '1') &&
+				(shape == 'connector' || shape == 'filledEdge' || shape == 'wire' || shape == 'pipe');
+        }},
         {name: 'sourcePortConstraint', dispName: 'Source Constraint', type: 'enum', defVal: 'none',
         	enumList: [{val: 'none', dispName: 'None'}, {val: 'north', dispName: 'North'}, {val: 'east', dispName: 'East'}, {val: 'south', dispName: 'South'}, {val: 'west', dispName: 'West'},
         		{val: 'northsouth', dispName: 'North + South'}, {val: 'eastwest', dispName: 'East + West'}]
@@ -1070,7 +1086,8 @@
         			{val: 'orthogonalPerimeter', dispName: 'Orthogonal'}, {val: 'backbonePerimeter', dispName: 'Backbone'},
         			{val: 'calloutPerimeter', dispName: 'Callout'}, {val: 'parallelogramPerimeter', dispName: 'Parallelogram'},
         			{val: 'trapezoidPerimeter', dispName: 'Trapezoid'}, {val: 'stepPerimeter', dispName: 'Step'},
-        			{val: 'centerPerimeter', dispName: 'Center'}, {val: 'cloudPerimeter', dispName: 'Cloud'}]
+        			{val: 'centerPerimeter', dispName: 'Center'}, {val: 'cloudPerimeter', dispName: 'Cloud'},
+        			{val: 'outlinePerimeter', dispName: 'Outline'}]
         },
         {name: 'labelPerimeter', dispName: 'Label Perimeter', type: 'bool', defVal: false,
         	isVisible: function(state, format)
@@ -1210,6 +1227,7 @@
         {name: 'resizable', dispName: 'Resizable', type: 'bool', defVal: true},
         {name: 'resizeWidth', dispName: 'Resize Width', type: 'bool', defVal: false},
         {name: 'resizeHeight', dispName: 'Resize Height', type: 'bool', defVal: false},
+        {name: 'resizeCentered', dispName: 'Resize Centered', type: 'bool', defVal: false},
         {name: 'rotatable', dispName: 'Rotatable', type: 'bool', defVal: true},
         {name: 'cloneable', dispName: 'Cloneable', type: 'bool', defVal: true},
         {name: 'deletable', dispName: 'Deletable', type: 'bool', defVal: true},
@@ -3666,6 +3684,12 @@
 				mxGraph.prototype.enterStopsCellEditing = config.stopEditingOnEnter;
 			}
 
+			// Shift+Cursor selects the nearest shape and Alt+Cursor moves by the grid size
+			if (config.shiftArrowSelect != null)
+			{
+				EditorUi.prototype.shiftArrowSelect = config.shiftArrowSelect;
+			}
+
 			// Overrides default folding enabled
 			if (config.defaultFoldingEnabled != null)
 			{
@@ -3914,6 +3938,11 @@
 			if (config.enableWindowDocking != null)
 			{
 				Editor.enableWindowDocking = config.enableWindowDocking;
+			}
+
+			if (config.restoreVisibleWindows != null)
+			{
+				Editor.restoreVisibleWindows = config.restoreVisibleWindows;
 			}
 
 			if (config.compact != null)
@@ -5942,9 +5971,19 @@
 		// with cssVars, into local symbols with the theming per use tag
 		var symbolCache = new Object();
 
+		// Adds definitions to the defs of the root, which are not in a page
+		// that is hidden in an SVG of all pages (see Graph.createSvgWithViews)
 		var getDefs = function()
 		{
-			var defs = svgRoot.getElementsByTagName('defs')[0];
+			var defs = null;
+
+			for (var node = svgRoot.firstChild; node != null && defs == null; node = node.nextSibling)
+			{
+				if (node.nodeName == 'defs')
+				{
+					defs = node;
+				}
+			}
 
 			if (defs == null)
 			{
@@ -6036,7 +6075,8 @@
 		// that use tags can scale the shared content, with one symbol per
 		// aspect mode that reference a shared image for the data. Images
 		// that match the source of an existing symbol for themed images
-		// are redirected to that symbol.
+		// in their page or in the defs of the root are redirected to that
+		// symbol.
 		var dedupImageDefs = mxUtils.bind(this, function()
 		{
 			pending.push(mxUtils.bind(this, function()
@@ -6054,6 +6094,17 @@
 					var redirects = {};
 					var payloads = {};
 					var keys = [];
+
+					// Returns the page of the given node in an SVG of all pages
+					var getPage = function(node)
+					{
+						while (node.parentNode != null && node.parentNode != svgRoot)
+						{
+							node = node.parentNode;
+						}
+
+						return (node.nodeName == 'svg') ? node : null;
+					};
 
 					var retargetUses = function()
 					{
@@ -6143,7 +6194,8 @@
 									href + '|' + (par != 'none'));
 								var symbol = svgRoot.querySelector('[id="' + symbolId + '"]');
 
-								if (symbol != null && symbol.nodeName == 'symbol')
+								if (symbol != null && symbol.nodeName == 'symbol' &&
+									(getPage(symbol) == null || getPage(symbol) == getPage(img)))
 								{
 									if (inline)
 									{
@@ -6964,7 +7016,20 @@
 			ignoreSelection = (ignoreSelection != null) ? ignoreSelection : true;
 			graph = (graph != null) ? graph : this.graph;
 			border = (border != null) ? border : 0;
-			
+
+			// Waits for the outlines of images that edges end on (see Graph.waitForOutlines)
+			if (graph.hasPendingOutlines())
+			{
+				var args = arguments;
+
+				graph.waitForOutlines(mxUtils.bind(this, function()
+				{
+					this.exportToCanvas.apply(this, args);
+				}), 10000);
+
+				return;
+			}
+
 			var bg = (transparentBackground) ? null : graph.background;
 			
 			if (bg == mxConstants.NONE)
@@ -8066,7 +8131,13 @@
 			{name: 'width', dispName:'Title Width', type:'float', defVal:60, min:0},
 			{name: 'height', dispName:'Title Height', type:'float', defVal:30, min:0}
 		];
-		
+
+		// Space between the lanes of a tie (see mxGraphView.updateTieLayout)
+		mxCellRenderer.defaultShapes['tie'].prototype.customProperties = [
+			{name: 'tieSpacing', dispName: 'Spacing', type: 'float', min: 0, max: 100,
+				defVal: Graph.prototype.defaultTieSpacing}
+		];
+
 		/**
 		 * Configures global color schemes.
 		 */
@@ -8734,19 +8805,46 @@
 						
 						mxEvent.addListener(input, 'keypress', function(e)
 						{
-							if (e.keyCode == 13) 
+							if (e.keyCode == 13)
 							{
 								setInputVal();
 								//set value triggers a redraw of the panel which removes the input
 							}
 						});
-						
-						input.focus();
-						
-						//FF calls blur on focus! so set the event after focusing
-						mxEvent.addListener(input, 'blur', function() 
+
+						// Escape cancels the edit before the focus goes back to the
+						// diagram, which would apply the value (see EditorUi.keydownHandler)
+						var cancelled = false;
+
+						mxEvent.addListener(input, 'keydown', function(e)
 						{
-							setInputVal();
+							if (e.keyCode == 27)
+							{
+								input.value = mxUtils.safeDecodeURIComponent(pValue);
+								cancelled = true;
+							}
+						});
+
+						mxEvent.addListener(input, 'input', function()
+						{
+							cancelled = false;
+						});
+
+						input.focus();
+
+						//FF calls blur on focus! so set the event after focusing
+						mxEvent.addListener(input, 'blur', function()
+						{
+							if (!cancelled)
+							{
+								setInputVal();
+							}
+							else
+							{
+								// Shows the value without the input as before the click
+								valueDiv.innerHTML = mxUtils.htmlEntities(
+									mxUtils.safeDecodeURIComponent(pValue));
+							}
 						});
 					}));
 				}
@@ -8785,12 +8883,16 @@
 			th.style.backgroundSize = '20px';
 			mxUtils.write(th, mxResources.get('property'));
 			hrow.style.cursor = 'pointer';
-			
+
+			// Expands and collapses with the keyboard (click on the row below)
+			that.editorUi.initKeyboardButton(th);
+
 			var onFold = function()
 			{
 				var rows = grid.querySelectorAll('.gePropNonHeaderRow');
 				var display;
-				
+				th.setAttribute('aria-expanded', (that.editorUi.propertiesCollapsed) ? 'false' : 'true');
+
 				if (!that.editorUi.propertiesCollapsed)
 				{
 					th.style.backgroundImage = 'url(\'' + Editor.arrowDownImage + '\')';
@@ -9035,6 +9137,8 @@
 						}));
 					}))(i);
 					
+					ui.initKeyboardButton(dot);
+					dot.setAttribute('aria-label', String(i + 1));
 					dots.push(dot);
 					switcher.appendChild(dot);
 				}
@@ -9065,7 +9169,7 @@
 						defaults[mxConstants.STYLE_FONTCOLOR] : 'default';
 					graph.replaceDefaultColors(new mxCell(), defaults);
 
-					var addButton = mxUtils.bind(this, function(colorset)
+					var addButton = mxUtils.bind(this, function(colorset, index)
 					{
 						var btn = mxUtils.button('', mxUtils.bind(this, function(evt)
 						{
@@ -9216,6 +9320,9 @@
 						}));
 		
 						btn.className = 'geStyleButton';
+						btn.setAttribute('aria-label', (colorset == null) ? mxResources.get('default') :
+							((colorset['title'] != null) ? colorset['title'] :
+							mxResources.get('style') + ' ' + (index + 1)));
 						btn.style.width = '36px';
 						btn.style.height = (this.defaultColorSchemes.length <= maxEntries) ? '24px' : '30px';
 						btn.style.margin = '0px 6px 6px 0px';
@@ -9296,6 +9403,10 @@
 										colorset['gradient']).light + ') 100%)';
 							lightBtn.style.clipPath = 'polygon(0 100%, 100% 0, 100% 100%)';
 							lightBtn.style.backgroundColor = 'transparent';
+
+							// Overlay of the button, which takes the keyboard focus
+							lightBtn.setAttribute('tabindex', '-1');
+							lightBtn.setAttribute('aria-hidden', 'true');
 							picker.appendChild(lightBtn);
 							lightBtn.style.marginLeft = '-42px';
 
@@ -9317,7 +9428,7 @@
 								mxUtils.br(picker);
 							}
 							
-							addButton(colorsets[i]);
+							addButton(colorsets[i], i);
 						}
 					}
 				});
@@ -9349,9 +9460,15 @@
 				right.style.cssText = 'position:absolute;left:186px;bottom:' + bottom + 'px;width:20px;' +
 					'background-image:url(' + Editor.chevronRightImage + ');';
 
+				ui.initKeyboardButton(left);
+				left.setAttribute('aria-label', mxResources.get('left'));
+				ui.initKeyboardButton(right);
+				right.setAttribute('aria-label', mxResources.get('right'));
+
+				// The buttons are absolute, so the left one comes first in the order of Tab
 				if (this.defaultColorSchemes.length > 1)
 				{
-					div.appendChild(left);
+					div.insertBefore(left, picker);
 					div.appendChild(right);
 				}
 				
@@ -9905,6 +10022,10 @@
 		tagCloud.style.bottom = '0px';
 		div.appendChild(tagCloud);
 
+		// The tags with their buttons are one tab stop for the keyboard
+		// (see Editor.createKeyboardGrid)
+		var keyboardGrid = Editor.createKeyboardGrid(tagCloud);
+
 		function removeInvisibleSelectionCells()
 		{
 			var cells = graph.getSelectionCells();
@@ -9935,11 +10056,13 @@
 	
 		function refreshTags(tags, selected)
 		{
+			keyboardGrid.begin();
 			tagCloud.innerText = '';
 	
 			if (tags.length > 0)
 			{
 				var table = document.createElement('table');
+				table.setAttribute('role', 'presentation');
 				table.setAttribute('cellpadding', '2');
 				table.style.boxSizing = 'border-box';
 				table.style.tableLayout = 'fixed';
@@ -9984,10 +10107,15 @@
 							td.style.align = 'center';
 							td.style.width = '16px';
 
+							var controls = [];
 							var img = document.createElement('img');
 							img.setAttribute('src', visible ? Editor.visibleImage : Editor.hiddenImage);
 							img.setAttribute('title', mxResources.get(visible ? 'hideIt' : 'show', [tag]) +
 								'\n' + mxResources.get('shiftClickShowOnly', [tag]));
+							img.setAttribute('aria-label', (visible) ? mxResources.get('hideIt', [tag]) :
+								mxResources.get('show') + ' ' + tag);
+							img.setAttribute('role', 'button');
+							controls.push(img);
 							mxUtils.setOpacity(img, visible ? 75 : 25);
 							img.className = 'geAdaptiveAsset';
 							img.style.verticalAlign = 'middle';
@@ -10058,6 +10186,9 @@
 							var img = document.createElement('img');
 							img.setAttribute('src', Editor.selectImage);
 							img.setAttribute('title', mxResources.get('select'));
+							img.setAttribute('aria-label', mxResources.get('select') + ' ' + tag);
+							img.setAttribute('role', 'button');
+							controls.push(img);
 							mxUtils.setOpacity(img, visible ? 75 : 25);
 							img.className = 'geAdaptiveAsset';
 							img.style.verticalAlign = 'middle';
@@ -10086,6 +10217,8 @@
 							td.style.verticalAlign = 'middle';
 							td.style.cursor = 'pointer';
 							td.setAttribute('title', tag);
+							td.setAttribute('role', 'button');
+							controls.push(td);
 	
 							var a = document.createElement('a');
 							mxUtils.write(a, tag);
@@ -10133,6 +10266,9 @@
 									var img = document.createElement('img');
 									img.setAttribute('src', Editor.trashImage);
 									img.setAttribute('title', mxResources.get('removeIt', [tag]));
+									img.setAttribute('aria-label', mxResources.get('removeIt', [tag]));
+									img.setAttribute('role', 'button');
+									controls.push(img);
 									mxUtils.setOpacity(img, visible ? 75 : 25);
 									img.className = 'geAdaptiveAsset';
 									img.style.verticalAlign = 'middle';
@@ -10176,6 +10312,8 @@
 									cb2.setAttribute('title', mxResources.get(
 										cb2.defaultChecked ?
 										'removeIt' : 'add', [tag]));
+									cb2.setAttribute('aria-label', tag);
+									controls.push(cb2);
 		
 									mxEvent.addListener(cb2, 'change', function(evt)
 									{
@@ -10197,6 +10335,7 @@
 								row.appendChild(td);
 							}
 	
+							keyboardGrid.addRow(tag, controls);
 							tbody.appendChild(row);
 						})(tags[i]);
 					}
@@ -10205,6 +10344,8 @@
 				table.appendChild(tbody);
 				tagCloud.appendChild(table);
 			}
+
+			keyboardGrid.end();
 		};
 	
 		var refreshUi = mxUtils.bind(this, function(sender, evt)
@@ -10263,6 +10404,7 @@
 			var resetLink = link.cloneNode(false);
 			resetLink.style.backgroundImage = 'url(' + Editor.visibleImage + ')';
 			resetLink.setAttribute('title', mxResources.get('reset'));
+			Editor.initKeyboardButton(resetLink);
 
 			mxEvent.addListener(resetLink, 'click', function(evt)
 			{
@@ -10285,6 +10427,7 @@
 				var addLink = link.cloneNode(false);
 				addLink.style.backgroundImage = 'url(' + Editor.plusImage + ')';
 				addLink.setAttribute('title', mxResources.get('add'));
+				Editor.initKeyboardButton(addLink);
 			
 				mxEvent.addListener(addLink, 'click', function(evt)
 				{
@@ -10677,13 +10820,22 @@
 	};
 
 	/**
+	 * Returns true if the given state shows a shape number. This implementation
+	 * returns true if enumerate is 1 in the style of the state.
+	 */
+	mxGraphView.prototype.isEnumerated = function(state)
+	{
+		return mxUtils.getValue(state.style, 'enumerate', 0) == '1';
+	};
+
+	/**
 	 * Adds drawing and update of the shape number. If keepValue is true then
 	 * an existing number is kept (eg. in exports, which do not number the
 	 * cells in a validation).
 	 */
 	mxGraphView.prototype.redrawEnumerationState = function(state, keepValue)
 	{
-		var enumerate = mxUtils.getValue(state.style, 'enumerate', 0) == '1';
+		var enumerate = this.isEnumerated(state);
 
 		// The numbers depend on the order of the walk over all cells (see
 		// mxGraphView.validateInvalidCells)
@@ -13469,15 +13621,8 @@
 		var pagesToInput = pagesFromInput.cloneNode(true);
 		pagesRow.appendChild(pagesToInput);
 
-		mxEvent.addListener(pagesFromInput, 'focus', function()
-		{
-			pagesRadio.checked = true;
-		});
-		
-		mxEvent.addListener(pagesToInput, 'focus', function()
-		{
-			pagesRadio.checked = true;
-		});
+		Dialog.checkRadioOnInput(pagesFromInput, pagesRadio);
+		Dialog.checkRadioOnInput(pagesToInput, pagesRadio);
 		
 		function validatePageRange()
 		{

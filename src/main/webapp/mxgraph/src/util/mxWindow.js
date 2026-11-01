@@ -321,6 +321,7 @@ mxWindow.prototype.init = function(x, y, width, height, style)
 	
 	this.div = document.createElement('div');
 	this.div.className = style;
+	this.div.setAttribute('role', 'dialog');
 
 	this.div.style.left = x + 'px';
 	this.div.style.top = y + 'px';
@@ -430,6 +431,7 @@ mxWindow.prototype.setTitle = function(title)
 	
 	mxUtils.write(this.title, title || '');
 	this.title.appendChild(this.buttons);
+	this.div.setAttribute('aria-label', title || '');
 };
 
 /**
@@ -540,6 +542,7 @@ mxWindow.prototype.setResizable = function(resizable)
 		if (this.resize == null)
 		{
 			this.resize = document.createElement('img');
+			this.resize.setAttribute('alt', '');
 			this.resize.style.position = 'absolute';
 			this.resize.style.bottom = '0px';
 			this.resize.style.right = '0px';
@@ -668,6 +671,7 @@ mxWindow.prototype.toggleMinimized = function(evt)
 	{
 		this.minimized = true;
 		
+		this.minimizeImg.setAttribute('aria-expanded', 'false');
 		this.minimizeImg.setAttribute('src', this.normalizeImage);
 		this.minimizeImg.setAttribute('title', mxResources.get('restore', null, 'Restore'));
 		this.contentWrapper.style.display = 'none';
@@ -701,6 +705,7 @@ mxWindow.prototype.toggleMinimized = function(evt)
 	{
 		this.minimized = false;
 		
+		this.minimizeImg.setAttribute('aria-expanded', 'true');
 		this.minimizeImg.setAttribute('src', this.minimizeImage);
 		this.minimizeImg.setAttribute('title', mxResources.get('minimize', null, 'Minimize'));
 		this.contentWrapper.style.display = ''; // default
@@ -746,6 +751,37 @@ mxWindow.prototype.installMinimizeHandler = function()
 	});
 	
 	mxEvent.addGestureListeners(this.minimizeImg, funct);
+	this.installKeyboardButton(this.minimizeImg, funct);
+	this.minimizeImg.setAttribute('aria-expanded', 'true');
+};
+
+/**
+ * Function: installKeyboardButton
+ *
+ * Makes the given button of the title bar a button for the keyboard: Tab
+ * focuses it and Enter and Space call the given function. The title of the
+ * button is its name.
+ *
+ * Parameters:
+ *
+ * elt - Image of the button.
+ * funct - Function that is called with the keystroke.
+ */
+mxWindow.prototype.installKeyboardButton = function(elt, funct)
+{
+	elt.setAttribute('role', 'button');
+	elt.setAttribute('tabindex', '0');
+
+	mxEvent.addListener(elt, 'keydown', function(evt)
+	{
+		if ((evt.keyCode == 13 /* Enter */ || evt.keyCode == 32 /* Space */) &&
+			!mxEvent.isAltDown(evt) && !mxEvent.isControlDown(evt) &&
+			!mxEvent.isMetaDown(evt))
+		{
+			funct(evt);
+			mxEvent.consume(evt);
+		}
+	});
 };
 	
 /**
@@ -871,6 +907,7 @@ mxWindow.prototype.installMaximizeHandler = function()
 	
 	mxEvent.addGestureListeners(this.maximize, funct);
 	mxEvent.addListener(this.title, 'dblclick', funct);
+	this.installKeyboardButton(this.maximize, funct);
 };
 	
 /**
@@ -975,19 +1012,62 @@ mxWindow.prototype.installCloseHandler = function()
 	mxEvent.addGestureListeners(this.closeImg,
 		mxUtils.bind(this, function(evt)
 		{
-			this.fireEvent(new mxEventObject(mxEvent.CLOSE, 'event', evt));
-			
-			if (this.destroyOnClose)
-			{
-				this.destroy();
-			}
-			else
-			{
-				this.setVisible(false);
-			}
-			
+			this.close(evt);
 			mxEvent.consume(evt);
 		}));
+
+	this.installKeyboardButton(this.closeImg, mxUtils.bind(this, function(evt)
+	{
+		this.close(evt);
+	}));
+};
+
+/**
+ * Function: close
+ *
+ * Closes the window as the close button does: fires a <mxEvent.CLOSE> event
+ * and destroys or hides the window (see <destroyOnClose>).
+ *
+ * Parameters:
+ *
+ * evt - Optional event that closes the window.
+ */
+mxWindow.prototype.close = function(evt)
+{
+	this.fireEvent(new mxEventObject(mxEvent.CLOSE, 'event', evt));
+
+	if (this.destroyOnClose)
+	{
+		this.destroy();
+	}
+	else
+	{
+		this.setVisible(false);
+	}
+};
+
+/**
+ * Function: close
+ *
+ * Closes the window as the close button does: fires a <mxEvent.CLOSE> event
+ * and destroys or hides the window (see <destroyOnClose>).
+ *
+ * Parameters:
+ *
+ * evt - Optional event that closes the window.
+ */
+mxWindow.prototype.close = function(evt)
+{
+	this.fireEvent(new mxEventObject(mxEvent.CLOSE, 'event', evt));
+
+	if (this.destroyOnClose)
+	{
+		this.destroy();
+	}
+	else
+	{
+		this.setVisible(false);
+	}
 };
 
 /**
@@ -1023,6 +1103,16 @@ mxWindow.prototype.setImage = function(image)
 mxWindow.prototype.setClosable = function(closable)
 {
 	this.closeImg.style.display = (closable) ? '' : 'none';
+};
+
+/**
+ * Function: isClosable
+ *
+ * Returns true if the window shows its close button.
+ */
+mxWindow.prototype.isClosable = function()
+{
+	return this.closeImg != null && this.closeImg.style.display != 'none';
 };
 
 /**

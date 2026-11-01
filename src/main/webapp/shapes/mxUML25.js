@@ -91,7 +91,7 @@ mxShapeUMLBehaviorAction.prototype.paintVertexShape = function(c, x, y, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 	
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 	
 	if (!rounded)
 	{
@@ -159,7 +159,7 @@ mxShapeUMLBehaviorAction.prototype.getConstraints = function(style, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 
 	if (!rounded)
 	{
@@ -225,7 +225,7 @@ mxShapeUMLAction.prototype.paintVertexShape = function(c, x, y, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 	
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 	
 	c.begin();
 	c.moveTo(0, arcSize);
@@ -267,7 +267,7 @@ mxShapeUMLAction.prototype.getConstraints = function(style, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 
 	var k = arcSize * (1 - Math.SQRT1_2);
 
@@ -328,7 +328,7 @@ mxShapeUMLActionParams.prototype.paintVertexShape = function(c, x, y, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 	
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 	
 	c.begin();
 	c.moveTo(20, arcSize);
@@ -375,7 +375,7 @@ mxShapeUMLActionParams.prototype.getConstraints = function(style, w, h)
 		arcSize = Math.min(w, h) * arcSize;
 	}
 
-	arcSize = Math.min(arcSize, w * 0.5, h * 0.5);
+	arcSize = Math.max(0, Math.min(arcSize, w * 0.5, h * 0.5));
 
 	var k = arcSize * (1 - Math.SQRT1_2);
 

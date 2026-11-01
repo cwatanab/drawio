@@ -504,6 +504,7 @@ DrawioFileSync.prototype.initRealtime = function()
 		this.ui.pages);
 	this.snapshotVars = (this.ui.fileNode != null) ?
 		this.ui.fileNode.getAttribute('vars') : null;
+	this.snapshotAttributes = this.file.getSyncedFileAttributes();
 
 	// Pages with local changes since the last flush; null means all
 	// pages are considered changed (conservative fallback)
@@ -531,6 +532,7 @@ DrawioFileSync.prototype.resetRealtime = function()
 	this.file.ownPages = null;
 	this.snapshot = null;
 	this.snapshotVars = null;
+	this.snapshotAttributes = null;
 	this.dirtyPageIds = null;
 };
 
@@ -1655,6 +1657,7 @@ DrawioFileSync.prototype.cleanup = function(success, error)
 				this.snapshot = this.ui.clonePages(this.ui.pages);
 				this.snapshotVars = (this.ui.fileNode != null) ?
 					this.ui.fileNode.getAttribute('vars') : null;
+				this.snapshotAttributes = this.file.getSyncedFileAttributes();
 				this.dirtyPageIds = Object.create(null);
 			}
 
@@ -1770,9 +1773,11 @@ DrawioFileSync.prototype.isAdditiveOnly = function(patch)
 		{
 			var pageDiff = update[id];
 
-			// Name, view state, view box and order are existing state
+			// Name, view state, view box, group, text alternative and order
+			// are existing state
 			if (pageDiff.name != null || pageDiff.view != null ||
-				pageDiff.viewBox != null || pageDiff.previous != null)
+				pageDiff.viewBox != null || pageDiff.group != null ||
+				pageDiff.alt != null || pageDiff.previous != null)
 			{
 				return false;
 			}
@@ -2552,14 +2557,15 @@ DrawioFileSync.prototype.getPageIdForChange = function(change)
 			return change.relatedPage.getId();
 		}
 	}
-	else if (change instanceof SelectPage || change instanceof MovePage)
+	else if (change instanceof SelectPage || change instanceof MovePage ||
+		change instanceof ChangePageGroup)
 	{
-		// Page order is derived from the page arrays in diffPages
-		// and the selection is not synced
+		// Page order and groups are derived from the page arrays in
+		// diffPages and the selection is not synced
 		return null;
 	}
 	else if (change instanceof RenamePage || change instanceof ChangePageView ||
-		change instanceof ChangePageId)
+		change instanceof ChangePageAlt || change instanceof ChangePageId)
 	{
 		if (change.page != null)
 		{
@@ -2762,16 +2768,39 @@ DrawioFileSync.prototype.sanitizePageTerminals = function(page)
 				if (term != null && term.getId() != null &&
 					lookup[term.getId()] != term)
 				{
+					// A terminal that a patch cut out of the tree (its top
+					// ancestor is a shape) is placed only with the origin
+					// of its old parent that the patch kept (see
+					// disconnectTerminal). Without it the point would be
+					// read from the page origin, so the end keeps its
+					// point, or gets the fallback below.
+					var graphModel = this.ui.editor.graph.getModel();
+					var top = graphModel.getRoot(term);
+					var origins = EditorUi.removedCellOrigins;
+
+					// The point is computed from the terminal, so the
+					// disconnect runs before removeEdge, which nulls the
+					// terminal (the other order left the end with
+					// neither, and the edge vanished on every client)
+					if (top == graphModel.getRoot(edges[i]) ||
+						(!top.isVertex() && !top.isEdge()) ||
+						(origins != null && origins.get(top) != null))
+					{
+						this.ui.disconnectTerminal(edges[i], source, null);
+					}
+
 					term.removeEdge(edges[i], source);
-					this.ui.disconnectTerminal(edges[i], source, null);
 					repairedIds[edges[i].getId()] = true;
+					term = null;
 
 					if (page == this.ui.currentPage)
 					{
 						this.ui.editor.graph.view.invalidate(edges[i]);
+						revalidate = true;
 					}
 				}
-				else if (term == null)
+
+				if (term == null)
 				{
 					// An end that is neither a terminal nor a point
 					// cannot be drawn: the edge silently disappears
@@ -2780,7 +2809,10 @@ DrawioFileSync.prototype.sanitizePageTerminals = function(page)
 					// The exact patch paths must not invent a point
 					// (it would break the sender's checksum), so the
 					// repair happens here, before the flush, where it
-					// is a regular local change that propagates.
+					// is a regular local change that propagates. This
+					// includes a disconnect above that found no point
+					// (a terminal that is a connector or has a relative
+					// geometry).
 					var geo = edges[i].getGeometry();
 
 					if (geo != null && geo.getTerminalPoint(source) == null)
@@ -2982,6 +3014,15 @@ DrawioFileSync.prototype.sendLocalChanges = function()
 			}
 
 			this.snapshotVars = currentVars;
+			var currentAttributes = this.file.getSyncedFileAttributes();
+
+			if (this.snapshotAttributes != null)
+			{
+				this.file.diffSyncedFileAttributes(patch,
+					this.snapshotAttributes, currentAttributes);
+			}
+
+			this.snapshotAttributes = currentAttributes;
 
 			this.file.ownPages = this.ui.patchPages(
 				this.file.ownPages, patch, true);
@@ -3172,7 +3213,9 @@ DrawioFileSync.prototype.merge = function(patches, checksum, desc, success, erro
 					}
 				}
 
-				this.file.setShadowPages(shadow, targetVars);
+				this.file.setShadowPages(shadow, targetVars,
+					this.file.patchSyncedFileAttributes(
+						this.file.getShadowAttributes(), patches));
 				this.file.acceptRemoteFileVars(patches);
 
 				// Patches the current document and own pages
@@ -3191,6 +3234,8 @@ DrawioFileSync.prototype.merge = function(patches, checksum, desc, success, erro
 					this.ui.patchFileNode(patches);
 					var newVars = (this.ui.fileNode != null) ?
 						this.ui.fileNode.getAttribute('vars') : null;
+					this.snapshotAttributes = this.file.patchSyncedFileAttributes(
+						this.snapshotAttributes, patches);
 
 					if (oldVars != newVars)
 					{
@@ -3401,6 +3446,7 @@ DrawioFileSync.prototype.fastForward = function(desc)
 
 	this.snapshotVars = (this.ui.fileNode != null) ?
 		this.ui.fileNode.getAttribute('vars') : null;
+	this.snapshotAttributes = this.file.getSyncedFileAttributes();
 	this.file.pendingFileVars = null;
 	this.file.savingFileVars = null;
 
@@ -4112,7 +4158,7 @@ DrawioFileSync.prototype.fileDataUpdated = function()
  * Invoked after a file was saved to add cache entry (which in turn notifies
  * collaborators).
  */
-DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, token, checksum, savedVars)
+DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, token, checksum, savedVars, savedAttributes)
 {
 	this.lastModified = this.file.getLastModifiedDate();
 	this.resetUpdateStatusThread();
@@ -4123,6 +4169,11 @@ DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, t
 	{
 		savedVars = (this.ui.fileNode != null) ?
 			this.ui.fileNode.getAttribute('vars') : null;
+	}
+
+	if (savedAttributes === undefined)
+	{
+		savedAttributes = this.file.getSyncedFileAttributes();
 	}
 
 	this.file.confirmFileVars(savedVars);
@@ -4173,6 +4224,9 @@ DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, t
 				{
 					diff[EditorUi.DIFF_FILE] = {vars: savedVars};
 				}
+
+				this.file.diffSyncedFileAttributes(diff,
+					this.file.getShadowAttributes(), savedAttributes);
 
 				var lastSecret = this.file.getDescriptorSecret(lastDesc);
 				checksum = (checksum != null) ? checksum : this.ui.getHashValueForPages(pages);
@@ -4269,7 +4323,7 @@ DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, t
 	
 	// Ignores cache response as clients
 	// load file if cache entry failed
-	this.file.setShadowPages(pages, savedVars);
+	this.file.setShadowPages(pages, savedVars, savedAttributes);
 
 	// Replaces the incrementally patched snapshot with a copy of
 	// the pages so that drift has a bounded lifetime, except if
@@ -4279,6 +4333,7 @@ DrawioFileSync.prototype.fileSaved = function(pages, lastDesc, success, error, t
 		this.snapshot = this.ui.clonePages(this.ui.pages);
 		this.snapshotVars = (this.ui.fileNode != null) ?
 			this.ui.fileNode.getAttribute('vars') : null;
+		this.snapshotAttributes = this.file.getSyncedFileAttributes();
 		this.dirtyPageIds = Object.create(null);
 	}
 	this.scheduleCleanup();

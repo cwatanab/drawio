@@ -730,6 +730,11 @@ mxPrintPreview.prototype.open = function(css, targetWindow, forcePageBreaks, kee
 				div.style.display = 'flex';
 				div.style.alignItems = 'center';
 				div.style.justifyContent = 'center';
+
+				// Adds the page before the graph so that the labels are measured
+				// in the document, which gives no sizes for detached nodes
+				addPage(div, true);
+
 				var clip = new mxRectangle(dx, dy, availableWidth, availableHeight);
 				this.addGraphFragment(-dx, -dy, this.scale, pageNum, div, clip);
 
@@ -738,8 +743,6 @@ mxPrintPreview.prototype.open = function(css, targetWindow, forcePageBreaks, kee
 				{
 					div.setAttribute('id', id);
 				}
-
-				addPage(div, true);
 			}
 		}
 

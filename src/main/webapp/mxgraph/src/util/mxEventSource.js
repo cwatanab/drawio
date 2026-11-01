@@ -39,6 +39,21 @@ function mxEventSource(eventSource)
 mxEventSource.prototype.eventListeners = null;
 
 /**
+ * Variable: removedListeners
+ *
+ * <mxDictionary> of the listeners that <removeListener> collected to remove
+ * them in one pass, or null. See <beginRemoveListeners>.
+ */
+mxEventSource.prototype.removedListeners = null;
+
+/**
+ * Variable: removedListenerCount
+ *
+ * Number of calls of <removeListener> collected in <removedListeners>.
+ */
+mxEventSource.prototype.removedListenerCount = 0;
+
+/**
  * Variable: eventsEnabled
  *
  * Specifies if events can be fired. Default is true.
@@ -102,6 +117,12 @@ mxEventSource.prototype.setEventSource = function(value)
  */
 mxEventSource.prototype.addListener = function(name, funct)
 {
+	// Removes the listener before it is added again
+	if (this.removedListeners != null && this.removedListeners.get(funct))
+	{
+		this.removeCollectedListeners();
+	}
+
 	if (this.eventListeners == null)
 	{
 		this.eventListeners = [];
@@ -118,7 +139,12 @@ mxEventSource.prototype.addListener = function(name, funct)
  */
 mxEventSource.prototype.removeListener = function(funct)
 {
-	if (this.eventListeners != null)
+	if (this.removedListeners != null)
+	{
+		this.removedListeners.put(funct, true);
+		this.removedListenerCount++;
+	}
+	else if (this.eventListeners != null)
 	{
 		var i = 0;
 		
@@ -132,6 +158,69 @@ mxEventSource.prototype.removeListener = function(funct)
 			{
 				i += 2;
 			}
+		}
+	}
+};
+
+/**
+ * Function: beginRemoveListeners
+ *
+ * Collects the listeners that <removeListener> removes until
+ * <endRemoveListeners> removes all occurrences of them in one pass, which
+ * takes linear time for many listeners. Collected listeners are removed
+ * before <fireEvent> and before they are added again, and listeners removed
+ * while an event is fired are removed at once, so the same listeners are
+ * called as without collecting. Only <eventListeners> keeps the collected
+ * listeners until then.
+ */
+mxEventSource.prototype.beginRemoveListeners = function()
+{
+	if (this.removedListeners == null)
+	{
+		this.removedListeners = new mxDictionary();
+		this.removedListenerCount = 0;
+	}
+};
+
+/**
+ * Function: endRemoveListeners
+ *
+ * Removes the listeners collected since <beginRemoveListeners>.
+ */
+mxEventSource.prototype.endRemoveListeners = function()
+{
+	this.removeCollectedListeners();
+	this.removedListeners = null;
+};
+
+/**
+ * Function: removeCollectedListeners
+ *
+ * Removes all occurrences of the listeners in <removedListeners> from
+ * <eventListeners> in one pass.
+ */
+mxEventSource.prototype.removeCollectedListeners = function()
+{
+	if (this.removedListenerCount > 0)
+	{
+		var remove = this.removedListeners;
+		this.removedListeners = new mxDictionary();
+		this.removedListenerCount = 0;
+
+		if (this.eventListeners != null)
+		{
+			var j = 0;
+
+			for (var i = 0; i < this.eventListeners.length; i += 2)
+			{
+				if (!remove.get(this.eventListeners[i + 1]))
+				{
+					this.eventListeners[j++] = this.eventListeners[i];
+					this.eventListeners[j++] = this.eventListeners[i + 1];
+				}
+			}
+
+			this.eventListeners.length = j;
 		}
 	}
 };
@@ -157,6 +246,11 @@ mxEventSource.prototype.removeListener = function(funct)
  */
 mxEventSource.prototype.fireEvent = function(evt, sender)
 {
+	// Listeners removed by listeners are removed at once (see beginRemoveListeners)
+	this.removeCollectedListeners();
+	var removed = this.removedListeners;
+	this.removedListeners = null;
+
 	if (this.eventListeners != null && this.isEventsEnabled())
 	{
 		if (evt == null)
@@ -186,4 +280,6 @@ mxEventSource.prototype.fireEvent = function(evt, sender)
 			}
 		}
 	}
+
+	this.removedListeners = removed;
 };

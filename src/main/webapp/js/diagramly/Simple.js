@@ -347,6 +347,8 @@ Editor.themes.push('atlas');
 								elt.setAttribute('title', title);
 							}
 							
+							// Shapes in the toolbar are controls for Tab (see Sidebar.addClickHandler)
+							elt.setAttribute('tabindex', '0');
 							picker.appendChild(elt);
 
 							if (value != 'simple' && key != null)
@@ -456,6 +458,8 @@ Editor.themes.push('atlas');
 				
 				mxEvent.addListener(foldImg, 'click', mxUtils.bind(this, function()
 				{
+					var focused = document.activeElement == foldImg;
+
 					if (collapsed)
 					{
 						picker.classList.remove('geCollapsedToolbar');
@@ -471,7 +475,15 @@ Editor.themes.push('atlas');
 						foldImg.style.backgroundImage = 'url(' + Editor.expandLessImage + ')';
 						collapsed = true;
 					}
+
+					// Keeps the focus for the keyboard as the toolbar is created again
+					if (focused)
+					{
+						foldImg.focus();
+					}
 				}));
+
+				this.initKeyboardButton(foldImg);
 				
 				var lastWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
 				var currentThread = null;
@@ -527,6 +539,36 @@ Editor.themes.push('atlas');
 		else
 		{
 			editorUiCreatePickerMenuForTheme.apply(this, arguments);
+		}
+	};
+
+	/**
+	 * Tab order of the simple and sketch themes: the toolbars at the top and
+	 * left, the shapes, the diagram, the format panel and the page tabs or the
+	 * zoom at the bottom (see EditorUi.getTabStops).
+	 */
+	var editorUiGetTabRegions = EditorUi.prototype.getTabRegions;
+
+	EditorUi.prototype.getTabRegions = function()
+	{
+		var sidebar = (this.sidebar != null) ? this.sidebar.container : null;
+		var graph = this.editor.graph;
+
+		if (Editor.currentTheme == 'simple')
+		{
+			return [this.sketchMainMenuElt, this.sketchFooterMenuElt, this.sketchPickerMenuElt,
+				this.sketchMenubarElt, sidebar, graph.container, this.getFormatRegion(),
+				this.tabContainer];
+		}
+		else if (Editor.currentTheme == 'sketch')
+		{
+			return [this.sketchMainMenuElt, this.sketchMenubarElt, this.sketchPickerMenuElt,
+				sidebar, graph.container, this.getFormatRegion(), this.tabContainer,
+				this.sketchFooterMenuElt];
+		}
+		else
+		{
+			return editorUiGetTabRegions.apply(this, arguments);
 		}
 	};
 

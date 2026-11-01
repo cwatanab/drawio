@@ -460,6 +460,39 @@ mxGuide.prototype.move = function(bounds, delta, gridEnabled, clone)
 };
 
 /**
+ * Function: moveExact
+ *
+ * Shows the guides for the given bounds moved by the given delta only where
+ * the bounds are aligned exactly and does not change the delta, eg. for moves
+ * with the keyboard, where snapping would keep the cells at the guides.
+ */
+mxGuide.prototype.moveExact = function(bounds, delta)
+{
+	var result = this.move(bounds, delta.clone(), false, false);
+	var tol = this.graph.getView().scale / 2;
+
+	if (Math.abs(result.x - delta.x) > tol)
+	{
+		if (this.guideX != null)
+		{
+			this.guideX.node.style.visibility = 'hidden';
+		}
+
+		this.hideDistanceGuides(true, false);
+	}
+
+	if (Math.abs(result.y - delta.y) > tol)
+	{
+		if (this.guideY != null)
+		{
+			this.guideY.node.style.visibility = 'hidden';
+		}
+
+		this.hideDistanceGuides(false, true);
+	}
+};
+
+/**
  * Function: moveDistance
  *
  * Snaps the <bounds> moved by the given <mxPoint> to positions where the

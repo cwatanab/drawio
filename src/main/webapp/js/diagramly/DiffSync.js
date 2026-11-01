@@ -236,12 +236,14 @@ EditorUi.prototype.applyPatches = function(pages, patches, markPages, resolver, 
 };
 
 /**
- * Applies file-level attribute changes from the given patches to the fileNode.
- * Returns true if any file-level attributes were changed.
+ * Applies file-level attribute changes from the given patches to the fileNode
+ * and updates the tabs if the page groups are shown or hidden. Returns true if
+ * any file-level attributes were changed.
  */
 EditorUi.prototype.patchFileNode = function(patches)
 {
 	var changed = false;
+	var tabs = false;
 
 	if (this.fileNode != null && patches != null)
 	{
@@ -252,6 +254,12 @@ EditorUi.prototype.patchFileNode = function(patches)
 				for (var key in patches[i][EditorUi.DIFF_FILE])
 				{
 					var val = patches[i][EditorUi.DIFF_FILE][key];
+
+					if (key == 'pageGroups')
+					{
+						tabs = tabs || (this.fileNode.getAttribute(key) !=
+							((val != null) ? String(val) : null));
+					}
 
 					if (val != null)
 					{
@@ -265,6 +273,11 @@ EditorUi.prototype.patchFileNode = function(patches)
 					changed = true;
 				}
 			}
+		}
+
+		if (tabs)
+		{
+			this.updateTabContainer();
 		}
 	}
 
@@ -298,6 +311,15 @@ EditorUi.prototype.getAbsoluteOrigin = function(cell)
 };
 
 /**
+ * Absolute origins of the parents that patches removed cells from, by
+ * removed cell (weak keys: nothing is added to the cells, their copies
+ * or the XML). The removal cuts the cell out of the tree, so a connector
+ * that still references it needs this origin for its open end (see
+ * disconnectTerminal).
+ */
+EditorUi.removedCellOrigins = new WeakMap();
+
+/**
  * Disconnects the given end of the edge and keeps the edge RENDERABLE:
  * an end that is neither a terminal nor a terminal point cannot be
  * drawn, so the edge silently disappears from the screen while the
@@ -309,7 +331,20 @@ EditorUi.prototype.getAbsoluteOrigin = function(cell)
  * geometry alone: several clients sanitize the same window
  * independently, so a view-dependent attachment point (as in the undo
  * replay, where a single client computes it and the diff distributes
- * the result) would diverge between them.
+ * the result) would diverge between them. It replaces a point that the
+ * end already has: the point of a connected end is not drawn and can be
+ * far away (eg. the old terminal of a clone, see mxGraph.cloneCells).
+ *
+ * A terminal in a subtree that was removed from the model (its topmost
+ * ancestor is a shape outside of the tree of the edge, not a root) has
+ * lost the offset of the parent it was removed from. A patch keeps that
+ * origin (removedCellOrigins), which makes the point exact. Without it,
+ * the offsets up to the removed shape are read in the frame of the
+ * edge's parent, which is exact if the shape was a child of the edge's
+ * parent: the edge is kept in the nearest common ancestor of its
+ * terminals (mxGraphModel.maintainEdgeParent), so the shape was there or
+ * below it. Subtracting the edge's origin from them put the end near the
+ * page origin.
  */
 EditorUi.prototype.disconnectTerminal = function(edge, source, model)
 {
@@ -318,8 +353,7 @@ EditorUi.prototype.disconnectTerminal = function(edge, source, model)
 		var terminal = edge.getTerminal(source);
 		var geo = edge.getGeometry();
 
-		if (terminal != null && geo != null &&
-			geo.getTerminalPoint(source) == null)
+		if (terminal != null && geo != null)
 		{
 			var tgeo = terminal.getGeometry();
 
@@ -327,6 +361,32 @@ EditorUi.prototype.disconnectTerminal = function(edge, source, model)
 			{
 				var to = this.getAbsoluteOrigin(terminal);
 				var eo = this.getAbsoluteOrigin(edge);
+				var graphModel = this.editor.graph.getModel();
+				var top = graphModel.getRoot(terminal);
+
+				if (top != graphModel.getRoot(edge) &&
+					(top.isVertex() || top.isEdge()))
+				{
+					var topGeo = top.getGeometry();
+
+					if (topGeo != null && !topGeo.relative && !top.isEdge())
+					{
+						to.x += topGeo.x;
+						to.y += topGeo.y;
+					}
+
+					var po = EditorUi.removedCellOrigins.get(top);
+
+					if (po != null)
+					{
+						to.x += po.x;
+						to.y += po.y;
+					}
+					else
+					{
+						eo = new mxPoint();
+					}
+				}
 				geo = geo.clone();
 				geo.setTerminalPoint(new mxPoint(
 					to.x + tgeo.width / 2 - eo.x,
@@ -604,6 +664,18 @@ EditorUi.prototype.patchPages = function(pages, diff, markPages, resolver, updat
 					}
 				}
 
+				// Page group — empty string removes it.
+				if (typeof pageDiff.group === 'string')
+				{
+					page.setGroup((pageDiff.group != '') ? pageDiff.group : null);
+				}
+
+				// Text alternative — empty string removes it.
+				if (typeof pageDiff.alt === 'string')
+				{
+					page.setAlt(pageDiff.alt);
+				}
+
 				if (pageDiff.view != null)
 				{
 					this.patchViewState(page, pageDiff.view);
@@ -726,6 +798,16 @@ EditorUi.prototype.patchPages = function(pages, diff, markPages, resolver, updat
 						{
 							page.node.setAttribute('viewBox', pageDiff.viewBox);
 						}
+					}
+
+					if (typeof pageDiff.group === 'string')
+					{
+						page.setGroup((pageDiff.group != '') ? pageDiff.group : null);
+					}
+
+					if (typeof pageDiff.alt === 'string')
+					{
+						page.setAlt(pageDiff.alt);
 					}
 
 					if (pageDiff.view != null)
@@ -1252,6 +1334,8 @@ EditorUi.prototype.patchPage = function(page, diff, resolver, updateEdgeParents,
 					model.getChildCount(root) > 1))
 				{
 					disconnect(cell);
+					EditorUi.removedCellOrigins.set(cell,
+						this.getAbsoluteOrigin(model.getParent(cell)));
 					model.remove(cell);
 				}
 			}
@@ -1944,6 +2028,26 @@ EditorUi.prototype.diffPages = function(oldPages, newPages, skipCells, changedCe
 				if (newViewBox != oldViewBox)
 				{
 					pageDiff.viewBox = (newViewBox != null) ? newViewBox : '';
+				}
+
+				// Page group is diffed like the view box (see
+				// DiagramPage.getGroup)
+				var oldGroup = oldPages[i].getGroup();
+				var newGroup = newPage.page.getGroup();
+
+				if (newGroup != oldGroup)
+				{
+					pageDiff.group = (newGroup != null) ? newGroup : '';
+				}
+
+				// Text alternative is diffed like the view box (see
+				// DiagramPage.getAlt)
+				var oldAlt = oldPages[i].getAlt();
+				var newAlt = newPage.page.getAlt();
+
+				if (newAlt != oldAlt)
+				{
+					pageDiff.alt = (newAlt != null) ? newAlt : '';
 				}
 
 				if (!mxUtils.isEmptyObject(pageDiff))

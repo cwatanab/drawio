@@ -929,6 +929,7 @@ GitHubClient.prototype.showGitHubDialog = function(showFiles, fn, hideNoFilesErr
 	div.style.lineHeight = '1.2em';
 	div.style.height = '290px';
 	content.appendChild(div);
+	Editor.keepFocusInList(div);
 	
 	var listItem = document.createElement('div');
 	listItem.style.textOverflow = 'ellipsis';
@@ -961,6 +962,7 @@ GitHubClient.prototype.showGitHubDialog = function(showFiles, fn, hideNoFilesErr
 		link.style.cursor = 'pointer';
 		mxUtils.write(link,  label);
 		mxEvent.addListener(link, 'click', exec);
+		Editor.initKeyboardButton(link);
 		
 		if (underline)
 		{
@@ -1078,6 +1080,7 @@ GitHubClient.prototype.showGitHubDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{
@@ -1224,6 +1227,7 @@ GitHubClient.prototype.showGitHubDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{
@@ -1329,6 +1333,7 @@ GitHubClient.prototype.showGitHubDialog = function(showFiles, fn, hideNoFilesErr
 		nextPageDiv.style.display = 'block';
 		nextPageDiv.style.cursor = 'pointer';
 		mxUtils.write(nextPageDiv, mxResources.get('more') + '...');
+		Editor.initKeyboardButton(nextPageDiv);
 		
 		var nextPage = mxUtils.bind(this, function()
 		{
