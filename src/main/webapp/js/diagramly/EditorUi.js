@@ -30337,14 +30337,15 @@
 		if (enabled)
 		{
 			this.showHiddenWindows();
+
+			if (!this.editor.chromeless || this.editor.editable)
+			{
+				this.restoreVisibleWindows();
+			}
 		}
 		else
 		{
 			this.hideWindows(true);
-		}
-		else if (!this.editor.chromeless || this.editor.editable)
-		{
-			this.restoreVisibleWindows();
 		}
 
 		this.editor.graph.sizeDidChange();
